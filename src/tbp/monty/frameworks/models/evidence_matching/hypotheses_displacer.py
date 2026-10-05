@@ -393,16 +393,20 @@ class DefaultHypothesesDisplacer:
             Pose evidence per hypothesis and node, shape (H, K). In range [-1, 1].
         """
         num_hyps, num_neighbors = node_features["pose_vectors"].shape[:2]
-        # Pose vectors store each axis of the pose's frame as a row, for surface and
-        # object poses alike. Transposing puts the axes in columns, which is the
-        # rotation from the pose's frame into the hypothesis-rotated frame.
+        # NOTE: Below gives a faster version that skips building the
+        # relative rotation. The trace of a rotation is 1 + 2 cos(angle), so:
+        #   trace = np.einsum(
+        #       "hij,hkij->hk",
+        #       query_features["pose_vectors"],
+        #       node_features["pose_vectors"].reshape(num_hyps, num_neighbors, 3, 3),
+        #   )
+        #   angle_error = np.arccos(np.clip((trace - 1) / 2, -1.0, 1.0))
+        # Rotation was used for readability.
         stored_poses = Rotation.from_matrix(
-            node_features["pose_vectors"].reshape(-1, 3, 3).swapaxes(-1, -2)
+            node_features["pose_vectors"].reshape(-1, 3, 3)
         )
         sensed_poses = Rotation.from_matrix(
-            np.repeat(
-                query_features["pose_vectors"].swapaxes(-1, -2), num_neighbors, axis=0
-            )
+            np.repeat(query_features["pose_vectors"], num_neighbors, axis=0)
         )
         angle_error = (stored_poses.inv() * sensed_poses).magnitude()
         return 1 - 2 * angle_error.reshape(num_hyps, num_neighbors) / np.pi
@@ -428,6 +432,7 @@ class DefaultHypothesesDisplacer:
         Returns:
             The sum of angle evidence weighted by weights. In range [-1, 1].
         """
+
         # TODO S: simplify by looping over pose vectors
         evidences_shape = node_distance_weights.shape[:2]
         pose_evidence_weighted = np.zeros(evidences_shape)
