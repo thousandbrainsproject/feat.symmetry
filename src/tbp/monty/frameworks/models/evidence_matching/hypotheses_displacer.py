@@ -432,7 +432,6 @@ class DefaultHypothesesDisplacer:
         Returns:
             The sum of angle evidence weighted by weights. In range [-1, 1].
         """
-
         # TODO S: simplify by looping over pose vectors
         evidences_shape = node_distance_weights.shape[:2]
         pose_evidence_weighted = np.zeros(evidences_shape)
