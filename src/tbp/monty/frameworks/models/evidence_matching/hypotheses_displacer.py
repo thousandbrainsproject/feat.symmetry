@@ -29,6 +29,7 @@ from tbp.monty.frameworks.models.evidence_matching.graph_memory import (
 from tbp.monty.frameworks.models.evidence_matching.hypotheses import Hypotheses
 from tbp.monty.frameworks.utils.graph_matching_utils import (
     get_custom_distances,
+    get_euclidean_distances,
     get_relevant_curvature,
 )
 from tbp.monty.frameworks.utils.spatial_arithmetics import (
@@ -294,18 +295,14 @@ class DefaultHypothesesDisplacer:
             nearest_node_ids = np.expand_dims(nearest_node_ids, axis=1)
 
         nearest_node_locs = channel_locations[nearest_node_ids]
-        max_abs_curvature = get_relevant_curvature(channel_features)
-        custom_nearest_node_dists = get_custom_distances(
+        nearest_node_dists = self._get_nearest_node_distances(
+            pose_kind=pose_kind,
             predicted_locations=search_locations,
             nearest_node_locations=nearest_node_locs,
-            surface_normals=pose_transformed_features["pose_vectors"][:, 0, :],
-            curvature=max_abs_curvature,
+            pose_transformed_features=pose_transformed_features,
+            channel_features=channel_features,
         )
-        # shape=(H, K)
-        node_distance_weights = self._get_node_distance_weights(
-            custom_nearest_node_dists
-        )
-        # Get IDs where custom_nearest_node_dists > max_match_distance
+        node_distance_weights = self._get_node_distance_weights(nearest_node_dists)
         mask = node_distance_weights <= 0
 
         new_pos_features = self.graph_memory.get_features_at_node(
@@ -366,6 +363,51 @@ class DefaultHypothesesDisplacer:
             radius_evidence,  # * node_distance_weights,
             axis=1,
         )
+
+    def _get_nearest_node_distances(
+        self,
+        pose_kind: PoseKind,
+        predicted_locations: np.ndarray,
+        nearest_node_locations: np.ndarray,
+        pose_transformed_features: dict,
+        channel_features: dict,
+    ) -> np.ndarray:
+        """Calculate the distance from each hypothesis to each of its nearest nodes.
+
+        Object poses have no surface normal to flatten the search sphere along, so
+        they use plain Euclidean distance. Surface poses penalize nodes off the
+        tangent plane, scaled by the sensed curvature.
+
+        Args:
+            pose_kind: Kind of pose sent by the input channel.
+            predicted_locations: Hypothesized locations, shape (H, 3).
+            nearest_node_locations: Locations of each hypothesis' nearest nodes,
+                shape (H, K, 3).
+            pose_transformed_features: Sensed features rotated by each hypothesis
+                pose. Only read for surface poses, where pose_vectors row 0 is the
+                surface normal.
+            channel_features: Sensed features of the input channel. Only read for
+                surface poses, to get the curvature.
+
+        Returns:
+            Distances, shape (H, K).
+
+        Raises:
+            ValueError: If the pose kind is unknown.
+        """
+        if pose_kind is PoseKind.OBJECT:
+            return get_euclidean_distances(
+                predicted_locations=predicted_locations,
+                nearest_node_locations=nearest_node_locations,
+            )
+        if pose_kind is PoseKind.SURFACE:
+            return get_custom_distances(
+                predicted_locations=predicted_locations,
+                nearest_node_locations=nearest_node_locations,
+                surface_normals=pose_transformed_features["pose_vectors"][:, 0, :],
+                curvature=get_relevant_curvature(channel_features),
+            )
+        raise ValueError(f"Unknown pose kind: {pose_kind}")
 
     def _get_node_distance_weights(self, distances):
         return (self.max_match_distance - distances) / self.max_match_distance

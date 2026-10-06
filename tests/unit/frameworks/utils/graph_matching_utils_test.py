@@ -35,7 +35,8 @@ class GetEuclideanDistancesTest(unittest.TestCase):
         )
         distances = get_euclidean_distances(
             predicted_locations=predicted_locations,
-            nearest_node_locations=nearest_node_locations)
+            nearest_node_locations=nearest_node_locations,
+        )
         # norm([0, 0, 0] - [3, 4, 0]) = 5
         # norm([0, 0, 0] - [0, 0, 2]) = 2
         # norm([1, 1, 1] - [1, 1, 1]) = 0
@@ -55,7 +56,7 @@ class GetCustomDistancesTest(unittest.TestCase):
             predicted_locations=predicted_locations,
             nearest_node_locations=nearest_node_locations,
             surface_normals=surface_normal,
-            curvature=curvature
+            curvature=curvature,
         )
 
         # For first node, dot product to SN is 0
@@ -81,13 +82,13 @@ class GetCustomDistancesTest(unittest.TestCase):
 
         euclidean_dists = get_euclidean_distances(
             predicted_locations=predicted_locations,
-            nearest_node_locations=nearest_node_locations
+            nearest_node_locations=nearest_node_locations,
         )
         custom_dists = get_custom_distances(
             predicted_locations=predicted_locations,
             nearest_node_locations=nearest_node_locations,
             surface_normals=surface_normals,
-            curvature=curvature
+            curvature=curvature,
         )
 
         self.assertTrue(np.all(custom_dists >= euclidean_dists))
