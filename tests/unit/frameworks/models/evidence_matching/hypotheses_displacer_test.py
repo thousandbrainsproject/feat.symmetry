@@ -251,7 +251,7 @@ class NearestNodeDistancesTest(TestCase):
 
     def test_object_pose_returns_euclidean_distance(self) -> None:
         predicted_locations = np.array([[0.0, 0.0, 0.0]])
-        nearest_node_locations = np.array([[0.01, 0.0, 0.0]])  # 10 mm away
+        nearest_node_locations = np.array([[[0.01, 0.0, 0.0]]])  # 10 mm away
         ground_truth_distance = np.array([[0.01]])
         computed_dist = self.displacer._get_nearest_node_distances(
             pose_kind=PoseKind.OBJECT,
