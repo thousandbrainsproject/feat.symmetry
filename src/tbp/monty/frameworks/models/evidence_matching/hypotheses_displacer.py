@@ -296,10 +296,10 @@ class DefaultHypothesesDisplacer:
         nearest_node_locs = channel_locations[nearest_node_ids]
         max_abs_curvature = get_relevant_curvature(channel_features)
         custom_nearest_node_dists = get_custom_distances(
-            nearest_node_locs,
-            search_locations,
-            pose_transformed_features["pose_vectors"][:, 0],
-            max_abs_curvature,
+            predicted_locations=search_locations,
+            nearest_node_locations=nearest_node_locs,
+            surface_normals=pose_transformed_features["pose_vectors"][:, 0, :],
+            curvature=max_abs_curvature,
         )
         # shape=(H, K)
         node_distance_weights = self._get_node_distance_weights(
