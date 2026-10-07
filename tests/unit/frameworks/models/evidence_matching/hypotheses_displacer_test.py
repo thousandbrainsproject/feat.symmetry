@@ -238,3 +238,46 @@ class ObjectPoseEvidenceTest(TestCase):
         """The surface pose path would score this as a match."""
         flipped = Rotation.from_euler("x", 180, degrees=True)
         self.assertAlmostEqual(self._evidence(flipped, Rotation.identity()), -1.0)
+
+
+class NearestNodeDistancesTest(TestCase):
+    def setUp(self) -> None:
+        self.displacer = DefaultHypothesesDisplacer(
+            feature_weights={},
+            graph_memory=Mock(),
+            max_match_distance=0.01,
+            feature_evidence_scorer=Mock(),
+        )
+
+    def test_object_pose_returns_euclidean_distance(self) -> None:
+        predicted_locations = np.array([[0.0, 0.0, 0.0]])
+        nearest_node_locations = np.array([[[0.01, 0.0, 0.0]]])  # 10 mm away
+        ground_truth_distance = np.array([[0.01]])
+        computed_dist = self.displacer._get_nearest_node_distances(
+            pose_kind=PoseKind.OBJECT,
+            predicted_locations=predicted_locations,
+            nearest_node_locations=nearest_node_locations,
+            pose_transformed_features={},
+            channel_features={},
+        )
+        np.testing.assert_allclose(computed_dist, ground_truth_distance)
+
+    def test_surface_pose_returns_custom_distance(self) -> None:
+        predicted_locations = np.array([[0.0, 0.0, 0.0]])
+        nearest_node_locations = np.array([[[0.01, 0.0, 0.0]]])  # 10 mm away
+        pose_transformed_features = {
+            "pose_vectors": np.identity(3).reshape(
+                1, 3, 3
+            ),  # Surface normal is [1, 0, 0]
+        }
+        channel_features = {"principal_curvatures_log": np.zeros(2)}
+        # euclidean distance + dot * 1/(curv + 0.5) = 0.01 + 0.01 / 0.5 = 0.03
+        ground_truth_distance = np.array([[0.03]])
+        computed_dist = self.displacer._get_nearest_node_distances(
+            pose_kind=PoseKind.SURFACE,
+            predicted_locations=predicted_locations,
+            nearest_node_locations=nearest_node_locations,
+            pose_transformed_features=pose_transformed_features,
+            channel_features=channel_features,
+        )
+        np.testing.assert_allclose(computed_dist, ground_truth_distance)
