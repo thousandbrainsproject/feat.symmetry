@@ -14,6 +14,7 @@ import numpy as np
 import numpy.typing as npt
 
 from tbp.monty.frameworks.utils.object_model_utils import (
+    object_pose_vector_mean,
     orthonormal_pose_vectors,
     pose_vector_mean,
     pose_vector_merge,
@@ -79,7 +80,7 @@ class PoseVectorsTest(unittest.TestCase):
                     for _ in range(6)
                 ]
             )
-            pv_mean, _ = pose_vector_mean(observations, np.ones((6, 1)))
+            pv_mean = pose_vector_mean(observations, np.ones((6, 1)))
             self.assert_is_rotation(
                 pv_mean, "Mean of spread observations is not a rotation"
             )
@@ -156,7 +157,7 @@ class PoseVectorsTest(unittest.TestCase):
                     for _ in range(4)
                 ]
             )
-            pv_mean, _ = pose_vector_mean(observations, np.ones((4, 1)))
+            pv_mean = pose_vector_mean(observations, np.ones((4, 1)))
             stored = pose_vector_merge(
                 pv_mean,
                 stored,
@@ -165,3 +166,17 @@ class PoseVectorsTest(unittest.TestCase):
             )
             observation_count += 4
             self.assert_is_rotation(stored, "Merged frame is not a rotation")
+
+    def test_object_pose_vector_mean_keeps_signed_axes(self) -> None:
+        observations = np.stack(
+            [
+                Rotation.identity().as_matrix().flatten(),
+                Rotation.from_euler("x", 120, degrees=True).as_matrix().flatten(),
+            ]
+        )
+        pv_mean = object_pose_vector_mean(observations)
+        np.testing.assert_allclose(
+            pv_mean,
+            Rotation.from_euler("x", 60, degrees=True).as_matrix().flatten(),
+            atol=DEFAULT_TOLERANCE,
+        )

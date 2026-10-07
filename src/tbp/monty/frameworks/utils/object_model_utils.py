@@ -8,6 +8,8 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
+from __future__ import annotations
+
 import logging
 
 import numpy as np
@@ -381,7 +383,9 @@ def pose_vector_merge(
     )
 
 
-def pose_vector_mean(pose_vecs, pose_fully_defined):
+def pose_vector_mean(
+    pose_vectors: np.ndarray, pose_fully_defined: np.ndarray
+) -> np.ndarray | None:
     """Calculate mean of pose vectors.
 
     This takes into account that surface normals may contain observations from two
@@ -392,23 +396,26 @@ def pose_vector_mean(pose_vecs, pose_fully_defined):
     return the first observation. Theoretically this shouldn't matter, but it can save
     some computation time.
 
+    Args:
+        pose_vectors: shape (N, 9) laid out as [SN, PC1, PC2] per row
+        pose_fully_defined: shape (N, 1) of 0 or 1 floats
+
     Returns:
-        Tuple containing the representative pose vector mean and a bool
-        indicating whether we used curvature directions to update it.
+        Mean pose vector or None if no valid pose vectors.
     """
     # Check the angle between all surface normals relative to the first curvature
     # directions. Then look at how many are positive vs. negative and use the ones
     # that make up the majority. So if 5 surface normals point one way and 10 in the
     # opposite, we will use the 10 and discard the rest. This avoids averaging over sns
     # that are from opposite sides of an objects surface.
-    valid_pose_vecs = np.where(np.any(pose_vecs, axis=1))[0]
+    valid_pose_vecs = np.where(np.any(pose_vectors, axis=1))[0]
     if len(valid_pose_vecs) == 0:
-        logger.debug(f"no valid pose vecs: {pose_vecs}")
-        return None, False
+        logger.debug(f"no valid pose vecs: {pose_vectors}")
+        return None
     # TODO: more generic names
-    surface_normals = pose_vecs[valid_pose_vecs, :3]
-    cds1 = pose_vecs[valid_pose_vecs, 3:6]
-    cds2 = pose_vecs[valid_pose_vecs, 6:9]
+    surface_normals = pose_vectors[valid_pose_vecs, :3]
+    cds1 = pose_vectors[valid_pose_vecs, 3:6]
+    cds2 = pose_vectors[valid_pose_vecs, 6:9]
     surface_normals_to_use = get_right_hand_angle(surface_normals, cds1[0], cds2[0]) > 0
     if (sum(surface_normals_to_use) < len(surface_normals_to_use) // 2) or (
         sum(surface_normals_to_use) == 0
@@ -425,7 +432,6 @@ def pose_vector_mean(pose_vecs, pose_fully_defined):
         # Just take 1st one. Shouldn't matter since cd should not be used anyways if
         # not pose_fully_defined. Only has a small effect on sampled possible poses.
         pv_means = orthonormal_pose_vectors(norm_mean, cds1[0])
-        use_cds_to_update = False
     else:
         # Find cds pointing in opposing directions and invert them. This is needed
         # because the curvature directions are ambiguous and both directions are
@@ -433,10 +439,33 @@ def pose_vector_mean(pose_vecs, pose_fully_defined):
         cd1_dirs = get_right_hand_angle(cds1, cds2[0], norm_mean) < 0
         cds1[cd1_dirs] = -cds1[cd1_dirs]
         pv_means = orthonormal_pose_vectors(norm_mean, np.mean(cds1, axis=0))
-        use_cds_to_update = True
 
     assert not np.any(np.isnan(pv_means)), "NaN in pose vector mean"
-    return pv_means, use_cds_to_update
+    return pv_means
+
+
+def object_pose_vector_mean(pose_vectors: np.ndarray) -> np.ndarray:
+    """Calculate the mean orientation of object pose vectors.
+
+    Unlike pose_vector_mean, every row is a signed axis of a full rotation, so
+    there is no surface-side vote and no curvature-direction flip. Each row of
+    pose_vectors holds one rotation matrix flattened row-major.
+
+    Args:
+        pose_vectors: Array of shape (N, 9) with one flattened rotation per row.
+
+    Returns:
+        Mean rotation of shape (9,).
+
+    Raises:
+        ValueError: If any row is not a proper rotation (determinant <= 0).
+    """
+    pose_matrices = pose_vectors.reshape(-1, 3, 3)
+    # TODO: This check is not needed once we update from scipy 1.10.1 to 1.18
+    # Note for IP: May be deleted if we have upgraded when we get here
+    if not np.all(np.linalg.det(pose_matrices) > 0):
+        raise ValueError("Pose Vectors must be proper rotations.")
+    return Rotation.from_matrix(pose_matrices).mean().as_matrix().flatten()
 
 
 def get_most_common_bool(booleans):
