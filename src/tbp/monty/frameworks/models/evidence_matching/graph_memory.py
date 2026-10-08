@@ -12,7 +12,7 @@ import logging
 from typing import Mapping
 
 from tbp.monty.frameworks.models.evidence_matching.channels import PoseKind
-from tbp.monty.frameworks.models.graph_matching import GraphMemory
+from tbp.monty.frameworks.models.mixins.lm_memory import LMMemoryMixin
 from tbp.monty.frameworks.models.object_model import (
     GridObjectModel,
     GridTooSmallError,
@@ -21,18 +21,20 @@ from tbp.monty.frameworks.models.object_model import (
 logger = logging.getLogger(__name__)
 
 
-class EvidenceGraphMemory(GraphMemory):
-    """Custom GraphMemory that stores GridObjectModel instead of GraphObjectModel."""
+class EvidenceGraphMemory(LMMemoryMixin):
+    """LM memory that stores GridObjectModel instances.
+
+    A sibling of GraphMemory, not a subclass: both share storage and reads through
+    LMMemoryMixin, and each owns its own build and update logic.
+    """
 
     def __init__(
         self,
         max_nodes_per_graph,
         max_graph_size,
         num_model_voxels_per_dim,
-        *args,
-        **kwargs,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__()
 
         self.max_nodes_per_graph = max_nodes_per_graph
         self.max_graph_size = max_graph_size
