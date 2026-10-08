@@ -14,6 +14,8 @@ import numpy as np
 import numpy.typing as npt
 
 from tbp.monty.frameworks.utils.object_model_utils import (
+    as_pose_matrices,
+    object_pose_vector_mean,
     orthonormal_pose_vectors,
     pose_vector_mean,
     pose_vector_merge,
@@ -26,22 +28,25 @@ class PoseVectorsTest(unittest.TestCase):
     def setUp(self) -> None:
         self.normal = np.array([0.0, 0.0, 1.0])
         self.cd1 = np.array([1.0, 0.0, 0.0])
-        self.frame = np.hstack([self.normal, self.cd1, np.cross(self.normal, self.cd1)])
-        self.opposite_frame = np.hstack(
+        self.frame = np.stack([self.normal, self.cd1, np.cross(self.normal, self.cd1)])
+        self.opposite_frame = np.stack(
             [-self.normal, self.cd1, np.cross(-self.normal, self.cd1)]
         )
 
-    def assert_is_rotation(self, pose_vecs: npt.NDArray[np.float64], msg: str) -> None:
+    def assert_is_rotation(
+        self, pose_vectors: npt.NDArray[np.float64], msg: str
+    ) -> None:
         """Assert that the pose vectors can be read as a rotation.
 
         In other words, that the surface normal and the two principal curvatures form an
         orthonormal, right-handed basis.
 
         Args:
-            pose_vecs: Flat array of nine elements holding the pose vectors.
+            pose_vectors: (3, 3) matrix whose rows are the pose vectors.
             msg: Assertion message.
         """
-        matrix = np.array(pose_vecs).reshape((3, 3))
+        self.assertEqual(pose_vectors.shape, (3, 3), msg)
+        matrix = np.asarray(pose_vectors)
         np.testing.assert_allclose(
             np.linalg.det(matrix), 1.0, atol=DEFAULT_TOLERANCE, rtol=0.0, err_msg=msg
         )
@@ -58,7 +63,7 @@ class PoseVectorsTest(unittest.TestCase):
     def test_orthonormal_pose_vectors_orthgonalizes_curvature_direction(self) -> None:
         pose_vecs = orthonormal_pose_vectors(self.normal, np.array([1.0, 0.0, 0.7]))
         self.assert_is_rotation(pose_vecs, "Pose vectors are not a rotation")
-        np.testing.assert_allclose(pose_vecs[:3], self.normal, atol=DEFAULT_TOLERANCE)
+        np.testing.assert_allclose(pose_vecs[0], self.normal, atol=DEFAULT_TOLERANCE)
 
     def test_orthonormal_pose_vectors_falls_back_to_arbitrary_direction_if_curvature_direction_is_parallel_to_surface_normal(  # noqa: E501
         self,
@@ -79,7 +84,7 @@ class PoseVectorsTest(unittest.TestCase):
                     for _ in range(6)
                 ]
             )
-            pv_mean, _ = pose_vector_mean(observations, np.ones((6, 1)))
+            pv_mean = pose_vector_mean(observations, np.ones((6, 1)))
             self.assert_is_rotation(
                 pv_mean, "Mean of spread observations is not a rotation"
             )
@@ -104,7 +109,7 @@ class PoseVectorsTest(unittest.TestCase):
             num_new_obs=8,
             num_previous_obs=4,
         )
-        np.testing.assert_allclose(keeps_new[:3], -self.normal, atol=DEFAULT_TOLERANCE)
+        np.testing.assert_allclose(keeps_new[0], -self.normal, atol=DEFAULT_TOLERANCE)
         keeps_previous = pose_vector_merge(
             self.opposite_frame,
             self.frame,
@@ -112,7 +117,7 @@ class PoseVectorsTest(unittest.TestCase):
             num_previous_obs=8,
         )
         np.testing.assert_allclose(
-            keeps_previous[:3], self.normal, atol=DEFAULT_TOLERANCE
+            keeps_previous[0], self.normal, atol=DEFAULT_TOLERANCE
         )
 
     def test_pose_vector_merge_averages_normals_on_the_same_surface_side(self) -> None:
@@ -124,7 +129,7 @@ class PoseVectorsTest(unittest.TestCase):
             num_previous_obs=4,
         )
         self.assert_is_rotation(merged, "Merged pose vectors are not a rotation")
-        self.assertGreater(np.dot(merged[:3], self.normal), 0.0)
+        self.assertGreater(np.dot(merged[0], self.normal), 0.0)
 
     def test_pose_vector_merge_repeated_merges_from_the_opposite_side_stay_a_rotation(
         self,
@@ -156,7 +161,7 @@ class PoseVectorsTest(unittest.TestCase):
                     for _ in range(4)
                 ]
             )
-            pv_mean, _ = pose_vector_mean(observations, np.ones((4, 1)))
+            pv_mean = pose_vector_mean(observations, np.ones((4, 1)))
             stored = pose_vector_merge(
                 pv_mean,
                 stored,
@@ -165,3 +170,26 @@ class PoseVectorsTest(unittest.TestCase):
             )
             observation_count += 4
             self.assert_is_rotation(stored, "Merged frame is not a rotation")
+
+    def test_object_pose_vector_mean_keeps_signed_axes(self) -> None:
+        observations = np.stack(
+            [
+                Rotation.identity().as_matrix(),
+                Rotation.from_euler("x", 120, degrees=True).as_matrix(),
+            ]
+        )
+        pv_mean = object_pose_vector_mean(observations)
+        np.testing.assert_allclose(
+            pv_mean,
+            Rotation.from_euler("x", 60, degrees=True).as_matrix(),
+            atol=DEFAULT_TOLERANCE,
+        )
+
+    def test_as_pose_matrices_puts_each_pose_vector_in_a_row(self) -> None:
+        flat = np.arange(18).reshape(2, 9)
+        matrices = as_pose_matrices(flat)
+        self.assertEqual(matrices.shape, (2, 3, 3))
+        # Check that the first row of second matrix is [9, 10, 11]
+        # Note for IP: I picked this as an example to "extract" something like
+        # surface normal
+        np.testing.assert_array_equal(matrices[1, 0], [9.0, 10.0, 11.0])

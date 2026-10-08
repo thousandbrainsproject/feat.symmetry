@@ -8,6 +8,8 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
+from __future__ import annotations
+
 import logging
 
 import numpy as np
@@ -317,6 +319,37 @@ def get_cubic_patches(arr_shape, centers, size):
     return new_centers, mask
 
 
+def as_pose_matrices(pose_vectors: np.ndarray) -> np.ndarray:
+    """View stored pose vectors as matrices whose *row* are the pose vectors.
+
+    Args:
+        pose_vectors: Array of shape (..., 9).
+
+    Returns:
+        Array of shape (..., 3, 3); row i holds values 3i to 3i + 2.
+    """
+    # Note for IP: *pose_vectors.shape[:-1] unpacks the tuple of shape except the last
+    # Examples:
+    # (9, ) has shape[:-1] of (), reshaped to (3, 3)
+    # (N, 9) has shape[:-1] of (N,), reshaped to (N, 3, 3)
+    # (H, K, 9) has shape[:-1] of (H, K), reshaped to (H, K, 3, 3)
+    return pose_vectors.reshape(*pose_vectors.shape[:-1], 3, 3)
+
+
+def as_flat_pose(pose_matrices: np.ndarray) -> np.ndarray:
+    """Flatten pose matrices back into stored 'flat' layout.
+
+    Inverse of `as_pose_matrices`.
+
+    Args:
+        pose_matrices: Array of shape (..., 3, 3).
+
+    Returns:
+        Array of shape (..., 9).
+    """
+    return pose_matrices.reshape(*pose_matrices.shape[:-2], 9)
+
+
 def orthonormal_pose_vectors(
     surface_normal: npt.NDArray[np.float64],
     curvature_direction: npt.NDArray[np.float64],
@@ -333,8 +366,8 @@ def orthonormal_pose_vectors(
             or orthogonal to the surface normal.
 
     Returns:
-        Flat array of nine elements holding the surface normal and the two curvature
-        directions.
+        (3, 3) matrix with the surface normal and the two curvature directions as
+        **rows**.
     """
     normal = normalize(surface_normal)
     tangent = project_onto_tangent_plane(curvature_direction, normal)
@@ -344,7 +377,7 @@ def orthonormal_pose_vectors(
         # curvature directions are not used for matching in this case anyway.
         tangent = TangentFrame(normal).basis_u
     cd1 = normalize(tangent)
-    return np.hstack([normal, cd1, np.cross(normal, cd1)])
+    return np.stack([normal, cd1, np.cross(normal, cd1)])
 
 
 def pose_vector_merge(
@@ -361,27 +394,26 @@ def pose_vector_merge(
     the rotation mean, so the result is already in the same row layout.
 
     Args:
-        new_pose_vecs: Flat array of nine elements holding the pose vectors averaged
+        new_pose_vecs: (3, 3) matrix holding the pose vectors averaged
             over the new observations.
-        previous_pose_vecs: Flat array of nine elements holding the averaged previous
+        previous_pose_vecs: (3, 3) matrix holding the averaged previous
             pose vectors.
         num_new_obs: Number of new observations.
         num_previous_obs: Number of previous observations.
 
     Returns:
-        Flat array of nine elements holding the merged pose vectors.
+        (3, 3) matrix holding the merged pose vectors.
     """
     return (
-        Rotation.from_matrix(
-            np.stack([new_pose_vecs.reshape(3, 3), previous_pose_vecs.reshape(3, 3)])
-        )
+        Rotation.from_matrix(np.stack([new_pose_vecs, previous_pose_vecs]))
         .mean(weights=[num_new_obs, num_previous_obs])
         .as_matrix()
-        .flatten()
     )
 
 
-def pose_vector_mean(pose_vecs, pose_fully_defined):
+def pose_vector_mean(
+    pose_matrices: np.ndarray, pose_fully_defined: np.ndarray
+) -> np.ndarray | None:
     """Calculate mean of pose vectors.
 
     This takes into account that surface normals may contain observations from two
@@ -392,23 +424,31 @@ def pose_vector_mean(pose_vecs, pose_fully_defined):
     return the first observation. Theoretically this shouldn't matter, but it can save
     some computation time.
 
+    Args:
+        pose_matrices: shape (N, 3, 3), **rows** [SN, PC1, PC2] per observation.
+        pose_fully_defined: shape (N, 1) of 0 or 1 floats
+
     Returns:
-        Tuple containing the representative pose vector mean and a bool
-        indicating whether we used curvature directions to update it.
+        (3, 3) mean pose vector or None if no valid pose vectors.
     """
     # Check the angle between all surface normals relative to the first curvature
     # directions. Then look at how many are positive vs. negative and use the ones
     # that make up the majority. So if 5 surface normals point one way and 10 in the
     # opposite, we will use the 10 and discard the rest. This avoids averaging over sns
     # that are from opposite sides of an objects surface.
-    valid_pose_vecs = np.where(np.any(pose_vecs, axis=1))[0]
-    if len(valid_pose_vecs) == 0:
-        logger.debug(f"no valid pose vecs: {pose_vecs}")
-        return None, False
+    # Note for IP: Once pose_matrices are Rotation objects and not np.ndarray, this
+    # check can be removed as a matrix of all 0s is not a valid Rotation object.
+    # Note for IP: I'm also simplifying the old:
+    # valid_pose_vecs = np.where(np.any(...))[0] to be more readable for now.
+    is_valid = np.any(pose_matrices != 0, axis=(1, 2))  # (N,) bool
+    if not np.any(is_valid):
+        logger.debug(f"no valid pose vecs: {pose_matrices}")
+        return None
     # TODO: more generic names
-    surface_normals = pose_vecs[valid_pose_vecs, :3]
-    cds1 = pose_vecs[valid_pose_vecs, 3:6]
-    cds2 = pose_vecs[valid_pose_vecs, 6:9]
+    # Note for IP: I'm using boolean mask instead of index array
+    surface_normals = pose_matrices[is_valid, 0]
+    cds1 = pose_matrices[is_valid, 1]
+    cds2 = pose_matrices[is_valid, 2]
     surface_normals_to_use = get_right_hand_angle(surface_normals, cds1[0], cds2[0]) > 0
     if (sum(surface_normals_to_use) < len(surface_normals_to_use) // 2) or (
         sum(surface_normals_to_use) == 0
@@ -425,7 +465,6 @@ def pose_vector_mean(pose_vecs, pose_fully_defined):
         # Just take 1st one. Shouldn't matter since cd should not be used anyways if
         # not pose_fully_defined. Only has a small effect on sampled possible poses.
         pv_means = orthonormal_pose_vectors(norm_mean, cds1[0])
-        use_cds_to_update = False
     else:
         # Find cds pointing in opposing directions and invert them. This is needed
         # because the curvature directions are ambiguous and both directions are
@@ -433,10 +472,31 @@ def pose_vector_mean(pose_vecs, pose_fully_defined):
         cd1_dirs = get_right_hand_angle(cds1, cds2[0], norm_mean) < 0
         cds1[cd1_dirs] = -cds1[cd1_dirs]
         pv_means = orthonormal_pose_vectors(norm_mean, np.mean(cds1, axis=0))
-        use_cds_to_update = True
 
     assert not np.any(np.isnan(pv_means)), "NaN in pose vector mean"
-    return pv_means, use_cds_to_update
+    return pv_means
+
+
+def object_pose_vector_mean(pose_matrices: np.ndarray) -> np.ndarray:
+    """Calculate the mean orientation of object pose vectors.
+
+    Unlike pose_vector_mean, every row is a signed axis of a full rotation, so
+    there is no surface-side vote and no curvature-direction flip.
+
+    Args:
+        pose_matrices: Array of shape (N, 3, 3) with one flattened rotation per row.
+
+    Returns:
+        Mean rotation of shape (3, 3).
+
+    Raises:
+        ValueError: If any row is not a proper rotation (determinant <= 0).
+    """
+    # TODO: This check is not needed once we update from scipy 1.10.1 to 1.18
+    # Note for IP: May be deleted if we have upgraded when we get here
+    if not np.all(np.linalg.det(pose_matrices) > 0):
+        raise ValueError("Pose Vectors must be proper rotations.")
+    return Rotation.from_matrix(pose_matrices).mean().as_matrix()
 
 
 def get_most_common_bool(booleans):

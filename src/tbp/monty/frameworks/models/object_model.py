@@ -20,10 +20,12 @@ from scipy.spatial import KDTree
 from sklearn.neighbors import kneighbors_graph
 from torch_geometric.data import Data
 
-from tbp.monty.frameworks.models.abstract_monty_classes import ObjectModel
+from tbp.monty.frameworks.models.evidence_matching.channels import PoseKind
 from tbp.monty.frameworks.utils.graph_matching_utils import get_correct_k_n
 from tbp.monty.frameworks.utils.object_model_utils import (
     NumpyGraph,
+    as_flat_pose,
+    as_pose_matrices,
     build_point_cloud_graph,
     circular_mean,
     expand_index_dims,
@@ -31,6 +33,7 @@ from tbp.monty.frameworks.utils.object_model_utils import (
     get_most_common_value,
     get_values_from_dense_last_dim,
     increment_sparse_tensor_by_count,
+    object_pose_vector_mean,
     pose_vector_mean,
     pose_vector_merge,
     remove_close_points,
@@ -41,7 +44,7 @@ from tbp.monty.frameworks.utils.spatial_arithmetics import apply_rf_transform_to
 logger = logging.getLogger(__name__)
 
 
-class GraphObjectModel(ObjectModel):
+class GraphObjectModel:
     """Object model class that represents object as graphs."""
 
     def __init__(self, object_id):
@@ -355,13 +358,11 @@ class GridTooSmallError(Exception):
     pass
 
 
-class GridObjectModel(GraphObjectModel):
-    """Model of an object and all its functions.
+class GridObjectModel:
+    """Object model constrained by a voxel grid.
 
-    This model has the same basic functionality as the NumpyGraph models used in older
-    LM versions. On top of that we now have a grid representation of the object that
-    constrains the model size and resolution. Additionally, this model class implements
-    a lot of functionality that was previously implemented in the graph_utils.py file.
+    Observations are sorted into grids of fixed size and resolution.
+    Graph (a NumpyGraph without edges) is built from the most observed voxels.
 
     TODO: General cleanups that require more changes in other code
         - remove node_ids from input_channels and have as graph attribute
@@ -405,7 +406,7 @@ class GridObjectModel(GraphObjectModel):
 
     # =============== Public Interface Functions ===============
     # ------------------- Main Algorithm -----------------------
-    def build_model(self, locations, features):
+    def build_model(self, locations, features, pose_kind: PoseKind):
         """Build graph from locations and features sorted into grids."""
         (
             feature_array,
@@ -417,6 +418,7 @@ class GridObjectModel(GraphObjectModel):
             locations=locations,
             features=feature_array,
             observation_feature_mapping=observation_feature_mapping,
+            pose_kind=pose_kind,
         )
         self._graph = self._build_graph_from_grids()
         logger.info(f"built graph {self._graph}")
@@ -428,6 +430,7 @@ class GridObjectModel(GraphObjectModel):
         location_rel_model,
         object_location_rel_body,
         object_rotation,
+        pose_kind: PoseKind,
     ):
         """Add new locations and features into grids and rebuild graph."""
         rf_locations, rf_features = apply_rf_transform_to_points(
@@ -446,6 +449,7 @@ class GridObjectModel(GraphObjectModel):
             locations=rf_locations,
             features=feature_array,
             feature_mapping=observation_feature_mapping,
+            pose_kind=pose_kind,
         )
         new_graph = self._build_graph_from_grids()
         assert not np.any(np.isnan(new_graph.x))
@@ -499,26 +503,90 @@ class GridObjectModel(GraphObjectModel):
         return nearest_node_ids
 
     # ------------------ Getters & Setters ---------------------
+    @property
+    def x(self):
+        if self._graph is not None:
+            return self._graph.x
+
+    @property
+    def pos(self):
+        if self._graph is not None:
+            return self._graph.pos
+
+    @property
+    def feature_mapping(self):
+        if self._graph is not None:
+            return self._graph.feature_mapping
+
+    @property
+    def num_nodes(self):
+        return len(self._graph.pos) if self._graph is not None else 0
+
+    @property
+    def feature_ids_in_graph(self):
+        if self._graph is not None:
+            return self._graph.feature_mapping.keys()
+
+    def get_values_for_feature(self, feature):
+        feature_cols = slice(*self.feature_mapping[feature])
+        return self.x[:, feature_cols]
+
     def set_graph(self, graph):
-        """Set self._graph property and convert input graph to right format."""
+        """Set self._graph property and convert input graph to right format.
+
+        Only for use_original_graph models. Filling grids from a graph averages pose
+        vectors, which needs a pose kind, so that path is fill_grids_from_graph.
+
+        Args:
+            graph: Pretrained graph (NumpyGraph or torch_geometric Data).
+
+        Raises:
+            ValueError: If use_original_graph is False.
+        """
+        if not self.use_original_graph:
+            raise ValueError(
+                "set_graph only stores pretrained graphs as they are "
+                "(use_original_graph=True). Use fill_grids_from_graph instead."
+            )
+        graph = self._to_numpy_graph(graph)
+        # Just use pretrained graph. Do not use grids to constrain nodes.
+        self._graph = graph
+        self._location_tree = KDTree(
+            graph.pos,
+            leafsize=40,
+        )
+
+    def fill_grids_from_graph(self, graph, pose_kind: PoseKind):
+        """Fill the grids from a graph's nodes and rebuild the graph from them.
+
+        Args:
+            graph: Graph whose nodes are sorted into the grids (NumpyGraph or
+                torch_geometric Data).
+            pose_kind: What the graph's pose vectors represent.
+        """
+        # Note for IP: This was part of the else statement in set_graph
+        # but it was never used/reached. Just preserving.
+        graph = self._to_numpy_graph(graph)
+        self._initialize_and_fill_grid(
+            locations=graph.pos,
+            features=graph.x,
+            observation_feature_mapping=graph.feature_mapping,
+            pose_kind=pose_kind,
+        )
+        self._graph = self._build_graph_from_grids()
+
+    @staticmethod
+    def _to_numpy_graph(graph) -> NumpyGraph:
+        """Convert a torch_geometric graph to a NumpyGraph if needed.
+
+        Returns:
+            The graph as a NumpyGraph.
+        """
         if type(graph) is not NumpyGraph:
             # could also check if is type torch_geometric.data.data.Data
             logger.debug(f"turning graph of type {type(graph)} into numpy graph")
             graph = torch_graph_to_numpy(graph)
-        if self.use_original_graph:
-            # Just use pretrained graph. Do not use grids to constrain nodes.
-            self._graph = graph
-            self._location_tree = KDTree(
-                graph.pos,
-                leafsize=40,
-            )
-        else:
-            self._initialize_and_fill_grid(
-                locations=graph.pos,
-                features=graph.x,
-                observation_feature_mapping=graph.feature_mapping,
-            )
-            self._graph = self._build_graph_from_grids()
+        return graph
 
     # ------------------ Logging & Saving ----------------------
     def __repr__(self) -> str:
@@ -558,7 +626,7 @@ class GridObjectModel(GraphObjectModel):
         self._location_offset = center_voxel_index - start_index
 
     def _initialize_and_fill_grid(
-        self, locations, features, observation_feature_mapping
+        self, locations, features, observation_feature_mapping, pose_kind: PoseKind
     ):
         # TODO: Do we still need to do this with sparse tensors?
         self._observation_count = self._generate_empty_grid(
@@ -583,9 +651,10 @@ class GridObjectModel(GraphObjectModel):
             locations=locations,
             features=features,
             feature_mapping=observation_feature_mapping,
+            pose_kind=pose_kind,
         )
 
-    def _update_grids(self, locations, features, feature_mapping):
+    def _update_grids(self, locations, features, feature_mapping, pose_kind: PoseKind):
         """Update count, location and feature grids with observations.
 
         Raises:
@@ -666,6 +735,7 @@ class GridObjectModel(GraphObjectModel):
                     feature_mapping,
                     updated_fm,
                     new_feat_dim,
+                    pose_kind=pose_kind,
                 )
                 new_features.append(new_avg_feat)
 
@@ -797,32 +867,63 @@ class GridObjectModel(GraphObjectModel):
         new_features_in_voxel,
         previous_feat_in_voxel,
         voxel,
-        obs_fm,
-        target_fm,
+        obs_feat_mappings,
+        target_feat_mappings,
         target_feat_dim,
+        pose_kind: PoseKind,
     ):
         """Calculate new average features for a voxel.
 
+        Args:
+            new_features_in_voxel: Shape (N, total_feature_dim), one row per new
+                observation that fell into this voxel.
+            previous_feat_in_voxel: Flat features stored in this voxel so far, laid
+                out by self.feature_mapping.
+            voxel: Grid index of the voxel.
+            obs_feat_mappings: [start, stop) column range of each feature in
+                new_features_in_voxel, for example
+                {"pose_vectors": [0, 9], "pose_fully_defined": [9, 10],
+                "hsv": [10, 13], "curvature": [13, 14]}.
+            target_feat_mappings: [start, stop) column range of each feature in
+                the returned array.
+            target_feat_dim: Length of the returned array.
+            pose_kind: What the channel's pose vectors represent. Selects the
+                averaging: rotation mean for OBJECT, surface-aware mean for SURFACE.
+
         Returns:
             New average features for a voxel.
+
+        Raises:
+            ValueError: If pose_kind is not a handled PoseKind.
         """
         new_feature_avg = np.zeros(target_feat_dim)
-        if ("pose_vectors" in obs_fm) and ("pose_fully_defined" in obs_fm):
+        if ("pose_vectors" in obs_feat_mappings) and (
+            "pose_fully_defined" in obs_feat_mappings
+        ):
             # TODO: deal with case where not all of those keys are present
-            pv_ids = obs_fm["pose_vectors"]
-            pdefined_ids = obs_fm["pose_fully_defined"]
-            pose_vecs = new_features_in_voxel[:, pv_ids[0] : pv_ids[1]]
-            pdefined = new_features_in_voxel[:, pdefined_ids[0] : pdefined_ids[1]]
-            pv_mean, _ = pose_vector_mean(pose_vecs, pdefined)
-        for feature in obs_fm:
-            ids = obs_fm[feature]
+            # Each mapping entry is the [start, stop) column range of the feature
+            # in the combined feature array, so it unpacks straight into a slice.
+            pose_vector_cols = slice(*obs_feat_mappings["pose_vectors"])
+            pose_defined_cols = slice(*obs_feat_mappings["pose_fully_defined"])
+            pose_matrices = as_pose_matrices(new_features_in_voxel[:, pose_vector_cols])
+            pose_defined = new_features_in_voxel[:, pose_defined_cols]
+            mean_pose_vector: np.ndarray | None
+            if pose_kind is PoseKind.OBJECT:
+                mean_pose_vector = object_pose_vector_mean(pose_matrices)
+            elif pose_kind is PoseKind.SURFACE:
+                mean_pose_vector = pose_vector_mean(pose_matrices, pose_defined)
+            else:
+                raise ValueError(f"Pose kind {pose_kind} not supported.")
+        for feature in obs_feat_mappings:
+            ids = obs_feat_mappings[feature]
             feats = new_features_in_voxel[:, ids[0] : ids[1]]
+            avg_feat: np.ndarray | None
             if feature == "hsv":
                 avg_feat = np.zeros(3)
                 avg_feat[0] = circular_mean(feats[:, 0])
                 avg_feat[1:] = np.mean(feats[:, 1:], axis=0)
             elif feature == "pose_vectors":
-                avg_feat = pv_mean
+                avg_feat = mean_pose_vector
             elif feature in ["on_object", "pose_fully_defined"]:
                 avg_feat = get_most_common_bool(feats)
                 # NOTE: object_id may need its own most common function until
@@ -843,11 +944,11 @@ class GridObjectModel(GraphObjectModel):
 
                 if feature == "pose_vectors":
                     if avg_feat is None:
-                        avg_feat = previous_average
+                        avg_feat = as_pose_matrices(previous_average)
                     else:
                         avg_feat = pose_vector_merge(
                             avg_feat,
-                            previous_average,
+                            as_pose_matrices(previous_average),
                             num_new_obs,
                             num_old_obs,
                         )
@@ -861,7 +962,10 @@ class GridObjectModel(GraphObjectModel):
                 else:
                     # NOTE: could weight these
                     avg_feat = (avg_feat + previous_average) / 2
-            target_ids = target_fm[feature]
+            target_ids = target_feat_mappings[feature]
+            if feature == "pose_vectors" and avg_feat is not None:
+                # Back to the flat storage layout of the feature grid.
+                avg_feat = as_flat_pose(avg_feat)
             new_feature_avg[target_ids[0] : target_ids[1]] = avg_feat
         return new_feature_avg
 
