@@ -564,6 +564,8 @@ class GridObjectModel:
                 torch_geometric Data).
             pose_kind: What the graph's pose vectors represent.
         """
+        # Note for IP: This was part of the else statement in set_graph
+        # but it was never used/reached. Just preserving.
         graph = self._to_numpy_graph(graph)
         self._initialize_and_fill_grid(
             locations=graph.pos,
