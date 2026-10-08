@@ -37,6 +37,7 @@ __all__ = [
     "LMMemory",
     "LearningModule",
     "Monty",
+    "ObjectMemory",
     "ObjectModel",
     "Observations",
     "RuntimeContext",
@@ -446,14 +447,6 @@ class LMMemory(Snapshotable, metaclass=abc.ABCMeta):
     """Like a long-term memory storing all the knowledge an LM has."""
 
     ###
-    # Methods that define the algorithm
-    ###
-    @abc.abstractmethod
-    def update_memory(self, observations):
-        """Update models stored in memory given new observation & classification."""
-        pass
-
-    ###
     # Saving, loading
     ###
 
@@ -498,6 +491,53 @@ class ObjectModel(Protocol):
     def feature_ids_in_graph(self):
         """Names of the features stored in the graph."""
         ...
+
+
+class ObjectMemory(Protocol):
+    """Read interface of an LM's memory of object models. Used by LMs and their parts.
+
+    How memory is updated and how initial hypotheses are drawn from it are
+    specific to each implementation, so update_memory and get_initial_hypotheses
+    are not part of this protocol.
+    """
+
+    models_in_memory: dict[str, dict[str, ObjectModel]]
+
+    def get_memory_ids(self) -> list[str]:
+        """IDs of all objects stored in memory."""
+        ...
+
+    def get_input_channels_in_graph(self, graph_id: str) -> list[str]:
+        """Input channels that have a model for the given object."""
+        ...
+
+    def get_graph(self, graph_id: str, input_channel: str | None = None):
+        """Model of an object, for one channel or for all channels."""
+        ...
+
+    def get_locations_in_graph(self, graph_id: str, input_channel: str):
+        """Node locations of an object's model in one channel."""
+        ...
+
+    def get_features_at_node(
+        self, graph_id, input_channel, node_id, feature_keys=None
+    ) -> dict:
+        """Features stored at the given nodes."""
+        ...
+
+    def get_feature_array(self, graph_id: str):
+        """Per-channel feature arrays of an object, used for fast matching."""
+        ...
+
+    def get_feature_order(self, graph_id: str):
+        """Per-channel order of the features in get_feature_array."""
+        ...
+
+    def __len__(self) -> int: ...
+
+    def state_dict(self) -> Memento: ...
+
+    def load_state_dict(self, memento: Memento) -> None: ...
 
 
 class GoalGenerator(metaclass=abc.ABCMeta):
