@@ -985,6 +985,14 @@ class GraphLM(LearningModule):
 
     def _update_memory(self):
         """Give all infos to graph_memory.update_memory to determine how to update."""
+        self.graph_memory.update_memory(**self._graph_update_args())
+
+    def _graph_update_args(self) -> dict[str, Any]:
+        """Collect the keyword arguments for graph_memory.update_memory.
+
+        Returns:
+            Keyword arguments for graph_memory.update_memory.
+        """
         args = self.buffer.get_infos_for_graph_update()
         args["graph_id"] = self.detected_object
         args["object_rotation"] = self.detected_rotation_r
@@ -992,7 +1000,7 @@ class GraphLM(LearningModule):
             # TODO: find a solution that makes it more obvious when rotation is rel
             # the model or rel environment.
             args["object_rotation"] = args["object_rotation"].inv()
-        self.graph_memory.update_memory(**args)
+        return args
 
     def _update_target_graph_mapping(self, detected_object, target_object):
         """Update dicts that keep track which graphs were built from which objects."""

@@ -1034,6 +1034,19 @@ class EvidenceGraphLM(GraphLM):
                 axis=0,
             )
 
+    def _graph_update_args(self) -> dict[str, Any]:
+        """Collect the keyword arguments for graph_memory.update_memory.
+
+        Same as GraphLM._graph_update_args, plus each input channel's pose kind so
+        the grid models average pose vectors correctly.
+
+        Returns:
+            Keyword arguments for graph_memory.update_memory.
+        """
+        args = super()._graph_update_args()
+        args["pose_kinds"] = channel_pose_kinds(self.buffer.channel_sender_types)
+        return args
+
     def _check_for_unique_poses(
         self,
         graph_id,

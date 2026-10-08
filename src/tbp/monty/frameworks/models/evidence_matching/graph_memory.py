@@ -9,7 +9,9 @@
 # https://opensource.org/licenses/MIT.
 
 import logging
+from typing import Mapping
 
+from tbp.monty.frameworks.models.evidence_matching.channels import PoseKind
 from tbp.monty.frameworks.models.graph_matching import GraphMemory
 from tbp.monty.frameworks.models.object_model import (
     GridObjectModel,
@@ -39,6 +41,67 @@ class EvidenceGraphMemory(GraphMemory):
     # =============== Public Interface Functions ===============
 
     # ------------------- Main Algorithm -----------------------
+    def update_memory(
+        self,
+        locations,
+        features,
+        graph_id,
+        object_location_rel_body,
+        location_rel_model,
+        object_rotation,
+        pose_kinds: Mapping[str, PoseKind],
+    ):
+        """Determine how to update memory and call corresponding function.
+
+        Same as GraphMemory.update_memory, but each channel's pose kind is passed
+        down so the grid model can pick the right pose-vector average.
+
+        Args:
+            locations: Locations of all observations in the episode.
+            features: Features per input channel, aligned with locations.
+            graph_id: ID of the graph to build or extend. None skips the update.
+            object_location_rel_body: Location of the sensor in the body reference
+                frame.
+            location_rel_model: Location of the sensor in the model reference frame.
+            object_rotation: Rotation of the sensed object relative to the model.
+            pose_kinds: What each input channel's pose vectors represent.
+        """
+        if graph_id is None:
+            logger.info("no match found in time, not updating memory")
+            return
+        # Look up every channel before touching memory so a missing pose kind
+        # raises KeyError without leaving earlier channels half-updated.
+        pose_kind_per_channel = {channel: pose_kinds[channel] for channel in features}
+        for input_channel in features:
+            pose_kind = pose_kind_per_channel[input_channel]
+            (
+                input_channel_features,
+                input_channel_locations,
+            ) = self._extract_entries_with_content(features[input_channel], locations)
+            if (
+                graph_id in self.get_memory_ids()
+                and input_channel in self.get_input_channels_in_graph(graph_id)
+            ):
+                logger.info(f"{graph_id} already in memory ({self.get_memory_ids()})")
+                self._extend_graph(
+                    input_channel_locations,
+                    input_channel_features,
+                    graph_id,
+                    input_channel,
+                    object_location_rel_body,
+                    location_rel_model,
+                    object_rotation,
+                    pose_kind,
+                )
+            else:
+                logger.info(f"{graph_id} not in memory ({self.get_memory_ids()})")
+                self._build_graph(
+                    input_channel_locations,
+                    input_channel_features,
+                    graph_id,
+                    input_channel,
+                    pose_kind,
+                )
 
     # ------------------ Getters & Setters ---------------------
     def get_initial_hypotheses(self):
@@ -118,7 +181,7 @@ class EvidenceGraphMemory(GraphMemory):
         model.set_graph(graph)
         return model
 
-    def _build_graph(self, locations, features, graph_id, input_channel):
+    def _build_graph(self, locations, features, graph_id, input_channel, pose_kind):
         """Build a graph from a list of features at locations and add it to memory.
 
         This initializes a new GridObjectModel and calls model.build_graph.
@@ -128,6 +191,7 @@ class EvidenceGraphMemory(GraphMemory):
             features: List of features.
             graph_id: ID of the new graph.
             input_channel: Identifier of the input channel.
+            pose_kind: What the channel's pose vectors represent.
         """
         logger.info("Adding a new graph to memory.")
 
@@ -138,7 +202,9 @@ class EvidenceGraphMemory(GraphMemory):
             num_voxels_per_dim=self.num_model_voxels_per_dim,
         )
         try:
-            model.build_model(locations=locations, features=features)
+            model.build_model(
+                locations=locations, features=features, pose_kind=pose_kind
+            )
 
             if graph_id not in self.models_in_memory:
                 self.models_in_memory[graph_id] = {}
@@ -161,6 +227,7 @@ class EvidenceGraphMemory(GraphMemory):
         object_location_rel_body,
         location_rel_model,
         object_rotation,
+        pose_kind,
     ):
         """Add new observations into an existing graph.
 
@@ -173,6 +240,7 @@ class EvidenceGraphMemory(GraphMemory):
                 frame.
             location_rel_model: Location of the sensor in the model reference frame.
             object_rotation: Rotation of the sensed object relative to the model.
+            pose_kind: What the channel's pose vectors represent.
         """
         logger.info(f"Updating existing graph for {graph_id}")
 
@@ -183,6 +251,7 @@ class EvidenceGraphMemory(GraphMemory):
                 location_rel_model=location_rel_model,
                 object_location_rel_body=object_location_rel_body,
                 object_rotation=object_rotation,
+                pose_kind=pose_kind,
             )
             logger.info(
                 f"Extended graph {graph_id} with new points. New model:\n"

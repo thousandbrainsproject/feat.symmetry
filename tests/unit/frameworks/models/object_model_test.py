@@ -88,6 +88,7 @@ class ObjectModelTest(unittest.TestCase):
         model.build_model(
             self.dummy_locs,
             self.dummy_features,
+            pose_kind=PoseKind.SURFACE,
         )
         self.assertEqual(model.num_nodes, 4, "graph model should have 4 nodes.")
         for feature in self.dummy_features:
@@ -180,6 +181,7 @@ class ObjectModelTest(unittest.TestCase):
         model.build_model(
             self.dummy_locs,
             self.dummy_features,
+            pose_kind=PoseKind.SURFACE,
         )
         self.assertEqual(
             model.num_nodes,
@@ -200,6 +202,7 @@ class ObjectModelTest(unittest.TestCase):
         model.build_model(
             self.dummy_locs,
             self.dummy_features,
+            pose_kind=PoseKind.SURFACE,
         )
         self.assertListEqual(
             list(model.get_values_for_feature("pose_vectors")[0]),
@@ -233,6 +236,7 @@ class ObjectModelTest(unittest.TestCase):
         model2.build_model(
             self.dummy_locs,
             features,
+            pose_kind=PoseKind.SURFACE,
         )
         self.assertEqual(
             model2.get_values_for_feature("pose_fully_defined")[0],
@@ -244,6 +248,7 @@ class ObjectModelTest(unittest.TestCase):
         model2.build_model(
             self.dummy_locs,
             features,
+            pose_kind=PoseKind.SURFACE,
         )
         self.assertEqual(
             model2.get_values_for_feature("pose_fully_defined")[0],
@@ -262,6 +267,7 @@ class ObjectModelTest(unittest.TestCase):
         model3.build_model(
             self.dummy_locs,
             features,
+            pose_kind=PoseKind.SURFACE,
         )
         self.assertListEqual(
             list(np.round(model3.get_values_for_feature("pose_vectors")[0], 3)),
@@ -274,6 +280,7 @@ class ObjectModelTest(unittest.TestCase):
         model3.build_model(
             self.dummy_locs,
             features,
+            pose_kind=PoseKind.SURFACE,
         )
         self.assertListEqual(
             list(np.round(model3.get_values_for_feature("pose_vectors")[0], 3)),
@@ -292,6 +299,7 @@ class ObjectModelTest(unittest.TestCase):
         model4.build_model(
             self.dummy_locs,
             features,
+            pose_kind=PoseKind.SURFACE,
         )
         avg_pvs = model4.get_values_for_feature("pose_vectors")[0].reshape((3, 3))
         for pv in avg_pvs:
@@ -311,7 +319,9 @@ class ObjectModelTest(unittest.TestCase):
         model = GridObjectModel(
             "test_model", max_nodes=10, max_size=10, num_voxels_per_dim=5
         )
-        model.build_model(self.dummy_locs, self.dummy_features)
+        model.build_model(
+            self.dummy_locs, self.dummy_features, pose_kind=PoseKind.SURFACE
+        )
 
         for _ in range(3):
             features = copy.deepcopy(self.dummy_features)
@@ -323,6 +333,7 @@ class ObjectModelTest(unittest.TestCase):
                 location_rel_model=np.zeros(3),
                 object_location_rel_body=np.zeros(3),
                 object_rotation=Rotation.identity(),
+                pose_kind=PoseKind.SURFACE,
             )
 
         for pose_vectors in model.get_values_for_feature("pose_vectors"):
@@ -345,6 +356,7 @@ class ObjectModelTest(unittest.TestCase):
         model.build_model(
             self.dummy_locs,
             self.dummy_features,
+            pose_kind=PoseKind.SURFACE,
         )
         self.assertEqual(model.num_nodes, 3, "Max nodes not applied correctly.")
 
@@ -357,6 +369,7 @@ class ObjectModelTest(unittest.TestCase):
             model.build_model(
                 self.dummy_locs,
                 self.dummy_features,
+                pose_kind=PoseKind.SURFACE,
             )
 
     def _build_one_voxel_model(self, pose_kind):
