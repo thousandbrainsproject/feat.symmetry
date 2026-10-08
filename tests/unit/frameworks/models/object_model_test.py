@@ -10,11 +10,13 @@
 
 import copy
 import unittest
+from unittest.mock import Mock
 
 import numpy as np
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from tbp.monty.frameworks.models.evidence_matching.channels import PoseKind
 from tbp.monty.frameworks.models.object_model import (
     GraphObjectModel,
     GridObjectModel,
@@ -22,6 +24,7 @@ from tbp.monty.frameworks.models.object_model import (
 )
 from tbp.monty.frameworks.utils.spatial_arithmetics import check_orthonormal
 from tbp.monty.geometry import Rotation
+from tbp.monty.math import DEFAULT_TOLERANCE
 
 
 class ObjectModelTest(unittest.TestCase):
@@ -354,4 +357,84 @@ class ObjectModelTest(unittest.TestCase):
             model.build_model(
                 self.dummy_locs,
                 self.dummy_features,
+            )
+
+    def _build_one_voxel_model(self, pose_kind):
+        """Build a grid model from identity and Rx(120 deg) at same location.
+
+        Used for `test_object_pose_kind_stores_rotation_mean_in_voxel` and
+        `test_surface_pose_kind_keeps_curvature_flip_in_voxel`.
+
+        Returns:
+            The model's single stored pose as a Rotation.
+        """
+        pose_vectors = np.stack(
+            [
+                Rotation.identity().as_matrix().flatten(),
+                Rotation.from_euler("x", 120, degrees=True).as_matrix().flatten(),
+            ]
+        )
+        model = GridObjectModel(
+            "test_model", max_nodes=10, max_size=10, num_voxels_per_dim=10
+        )
+        model.build_model(
+            np.zeros((2, 3)),
+            {
+                "pose_vectors": pose_vectors,
+                "pose_fully_defined": np.array([True, True]),
+            },
+            pose_kind=pose_kind,
+        )
+        self.assertEqual(model.num_nodes, 1, "Model should have 1 node.")
+        stored = np.array(model.get_values_for_feature("pose_vectors"))[0]
+        return Rotation.from_matrix(stored.reshape((3, 3)))
+
+    def test_object_pose_kind_stores_rotation_mean_in_voxel(self):
+        stored = self._build_one_voxel_model(PoseKind.OBJECT)
+        expected = Rotation.from_euler("x", 60, degrees=True)
+        np.testing.assert_allclose(
+            stored.as_matrix(), expected.as_matrix(), atol=DEFAULT_TOLERANCE
+        )
+
+    def test_surface_pose_kind_keeps_curvature_flip_in_voxel(self):
+        stored = self._build_one_voxel_model(PoseKind.SURFACE)
+        expected = Rotation.from_euler("x", -30, degrees=True)
+        np.testing.assert_allclose(
+            stored.as_matrix(), expected.as_matrix(), atol=DEFAULT_TOLERANCE
+        )
+
+    def test_unhandled_pose_kind_raises(self):
+        with self.assertRaises(ValueError):
+            self._build_one_voxel_model(Mock())
+
+    def test_set_graph_without_use_original_graph_raises(self):
+        model = GridObjectModel(
+            "test_model", max_nodes=10, max_size=10, num_voxels_per_dim=10
+        )
+        model.build_model(self.dummy_locs, self.dummy_features, PoseKind.SURFACE)
+        with self.assertRaises(ValueError):
+            GridObjectModel(
+                "copy", max_nodes=10, max_size=10, num_voxels_per_dim=10
+            ).set_graph(model._graph)
+
+    def test_fill_grids_from_graph_keeps_object_poses(self):
+        rotation = Rotation.from_euler("xyz", [10, 20, 30], degrees=True)
+        features = {
+            "pose_vectors": np.vstack([rotation.as_matrix().flatten()] * 4),
+            "pose_fully_defined": np.array([True] * 4),
+        }
+        source = GridObjectModel(
+            "test_model", max_nodes=10, max_size=10, num_voxels_per_dim=10
+        )
+        source.build_model(self.dummy_locs, features, PoseKind.OBJECT)
+        model = GridObjectModel(
+            "copy", max_nodes=10, max_size=10, num_voxels_per_dim=10
+        )
+        model.fill_grids_from_graph(source._graph, PoseKind.OBJECT)
+        self.assertEqual(model.num_nodes, 4)
+        for pose_vectors in model.get_values_for_feature("pose_vectors"):
+            np.testing.assert_allclose(
+                np.array(pose_vectors).reshape(3, 3),
+                rotation.as_matrix(),
+                atol=DEFAULT_TOLERANCE,
             )
