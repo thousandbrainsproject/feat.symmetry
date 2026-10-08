@@ -176,16 +176,16 @@ class LMMemoryMixin:
 
     # ------------------- Main Algorithm -----------------------
     def _add_graph_to_memory(self, model, graph_id):
-        """Add pretrained graph to memory.
+        """Add a loaded model to memory as is.
 
-        Initializes GridObjectModel and calls set_model.
+        Memories that need to convert or repair loaded models (e.g.
+        EvidenceGraphMemory) override this.
 
         Args:
-            model: GraphObjectModel of torch graph to be added to memory
-            graph_id: id of graph that should be added
-
+            model: Per-channel object models to add, keyed by input channel.
+            graph_id: ID of the object the models belong to.
         """
-        print(f"loading graph {model} of type {type(model)}")
+        logger.info(f"Loaded {graph_id} with channels {list(model.keys())}")
 
         self.models_in_memory[graph_id] = model
 

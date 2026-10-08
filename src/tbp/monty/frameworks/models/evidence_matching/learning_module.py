@@ -258,7 +258,9 @@ class EvidenceGraphLM(GraphLM):
         kwargs["initialize_base_modules"] = False
         super().__init__(*args, **kwargs)
         # --- LM components ---
-        self.graph_memory = EvidenceGraphMemory(
+        # EvidenceGraphLM still inherits GraphLM, whose graph_memory is a GraphMemory.
+        # Removed by the deferred LM-hierarchy refactor.
+        self.graph_memory = EvidenceGraphMemory(  # type: ignore[assignment]
             max_nodes_per_graph=max_nodes_per_graph,
             max_graph_size=max_graph_size,
             num_model_voxels_per_dim=num_model_voxels_per_dim,

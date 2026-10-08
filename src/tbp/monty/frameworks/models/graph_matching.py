@@ -1103,7 +1103,9 @@ class GraphMemory(LMMemoryMixin):
     access the information stored in the books and can request books to be added to the
     library.
 
-    Subclasses are DisplacementGraphMemory, FeatureGraphMemory and EvidenceGraphMemory.
+    Subclasses are DisplacementGraphMemory and FeatureGraphMemory. EvidenceGraphMemory
+    is a sibling: it shares storage and reads through LMMemoryMixin but builds
+    GridObjectModel instances instead.
     """
 
     def __init__(self, graph_delta_thresholds=None, k=None) -> None:

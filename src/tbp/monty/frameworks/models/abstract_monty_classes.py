@@ -511,11 +511,11 @@ class ObjectMemory(Protocol):
         """Input channels that have a model for the given object."""
         ...
 
-    def get_graph(self, graph_id: str, input_channel: str | None = None):
+    def get_graph(self, graph_id: str, input_channel: str | None = None) -> Any:
         """Model of an object, for one channel or for all channels."""
         ...
 
-    def get_locations_in_graph(self, graph_id: str, input_channel: str):
+    def get_locations_in_graph(self, graph_id: str, input_channel: str) -> np.ndarray:
         """Node locations of an object's model in one channel."""
         ...
 
@@ -525,11 +525,11 @@ class ObjectMemory(Protocol):
         """Features stored at the given nodes."""
         ...
 
-    def get_feature_array(self, graph_id: str):
+    def get_feature_array(self, graph_id: str) -> dict[str, np.ndarray]:
         """Per-channel feature arrays of an object, used for fast matching."""
         ...
 
-    def get_feature_order(self, graph_id: str):
+    def get_feature_order(self, graph_id: str) -> dict[str, list[str]]:
         """Per-channel order of the features in get_feature_array."""
         ...
 
