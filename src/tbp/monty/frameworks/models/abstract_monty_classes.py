@@ -466,18 +466,38 @@ class LMMemory(Snapshotable, metaclass=abc.ABCMeta):
         pass
 
 
-class ObjectModel(metaclass=abc.ABCMeta):
-    """Model of an object. Is stored in Memory and used by LM."""
+class ObjectModel(Protocol):
+    """Read interface of an object model. Stored in LMMemory and used by LMs.
 
-    @abc.abstractmethod
-    def build_model(self, observations):
-        """Build a new model."""
-        pass
+    How a model is built and updated is specific to each implementation, so
+    build_model and update_model are not part of this protocol.
 
-    @abc.abstractmethod
-    def update_model(self, observations):
-        """Update an existing model with new observations."""
-        pass
+    Note for IP:
+    Return types of x and pos are left unannotated because implementations return
+    either torch tensors or numpy arrays.
+    """
+
+    object_id: str
+
+    @property
+    def x(self):
+        """Node features, one row per node. None if no graph is stored yet."""
+        ...
+
+    @property
+    def pos(self):
+        """Node locations, shape (num_nodes, 3). None if no graph is stored yet."""
+        ...
+
+    @property
+    def feature_mapping(self) -> dict[str, list[int]] | None:
+        """Map from feature name to its [start, end) column range in x."""
+        ...
+
+    @property
+    def feature_ids_in_graph(self):
+        """Names of the features stored in the graph."""
+        ...
 
 
 class GoalGenerator(metaclass=abc.ABCMeta):

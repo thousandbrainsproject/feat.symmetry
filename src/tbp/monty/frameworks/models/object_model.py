@@ -20,7 +20,6 @@ from scipy.spatial import KDTree
 from sklearn.neighbors import kneighbors_graph
 from torch_geometric.data import Data
 
-from tbp.monty.frameworks.models.abstract_monty_classes import ObjectModel
 from tbp.monty.frameworks.models.evidence_matching.channels import PoseKind
 from tbp.monty.frameworks.utils.graph_matching_utils import get_correct_k_n
 from tbp.monty.frameworks.utils.object_model_utils import (
@@ -45,7 +44,7 @@ from tbp.monty.frameworks.utils.spatial_arithmetics import apply_rf_transform_to
 logger = logging.getLogger(__name__)
 
 
-class GraphObjectModel(ObjectModel):
+class GraphObjectModel:
     """Object model class that represents object as graphs."""
 
     def __init__(self, object_id):
@@ -359,13 +358,11 @@ class GridTooSmallError(Exception):
     pass
 
 
-class GridObjectModel(GraphObjectModel):
-    """Model of an object and all its functions.
+class GridObjectModel:
+    """Object model constrained by a voxel grid.
 
-    This model has the same basic functionality as the NumpyGraph models used in older
-    LM versions. On top of that we now have a grid representation of the object that
-    constrains the model size and resolution. Additionally, this model class implements
-    a lot of functionality that was previously implemented in the graph_utils.py file.
+    Observations are sorted into grids of fixed size and resolution.
+    Graph (a NumpyGraph without edges) is built from the most observed voxels.
 
     TODO: General cleanups that require more changes in other code
         - remove node_ids from input_channels and have as graph attribute
@@ -506,6 +503,34 @@ class GridObjectModel(GraphObjectModel):
         return nearest_node_ids
 
     # ------------------ Getters & Setters ---------------------
+    @property
+    def x(self):
+        if self._graph is not None:
+            return self._graph.x
+
+    @property
+    def pos(self):
+        if self._graph is not None:
+            return self._graph.pos
+
+    @property
+    def feature_mapping(self):
+        if self._graph is not None:
+            return self._graph.feature_mapping
+
+    @property
+    def num_nodes(self):
+        return len(self._graph.pos) if self._graph is not None else 0
+
+    @property
+    def feature_ids_in_graph(self):
+        if self._graph is not None:
+            return self._graph.feature_mapping.keys()
+
+    def get_values_for_feature(self, feature):
+        feature_cols = slice(*self.feature_mapping[feature])
+        return self.x[:, feature_cols]
+
     def set_graph(self, graph):
         """Set self._graph property and convert input graph to right format.
 
