@@ -34,7 +34,6 @@ from tbp.monty.memento import Memento, Snapshotable
 __all__ = [
     "AgentObservations",
     "GoalGenerator",
-    "LMMemory",
     "LearningModule",
     "Monty",
     "ObjectMemory",
@@ -443,24 +442,8 @@ class LearningModule(
         pass
 
 
-class LMMemory(Snapshotable, metaclass=abc.ABCMeta):
-    """Like a long-term memory storing all the knowledge an LM has."""
-
-    ###
-    # Saving, loading
-    ###
-
-    @abc.abstractmethod
-    def state_dict(self) -> Memento:
-        pass
-
-    @abc.abstractmethod
-    def load_state_dict(self, memento: Memento) -> None:
-        pass
-
-
 class ObjectModel(Protocol):
-    """Read interface of an object model. Stored in LMMemory and used by LMs.
+    """Read interface of an object model. Stored in ObjectMemory and used by LMs.
 
     How a model is built and updated is specific to each implementation, so
     build_model and update_model are not part of this protocol.
