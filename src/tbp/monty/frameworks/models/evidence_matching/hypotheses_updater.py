@@ -295,7 +295,7 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
         features: dict,
         new_channels: list[str],
         graph_id: str,
-            pose_kinds: Mapping[str, PoseKind],
+        pose_kinds: Mapping[str, PoseKind],
     ) -> Hypotheses:
         """Initialize hypotheses for channels that haven't been seen before.
 
@@ -394,6 +394,8 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
                 possible_s_d = possible_sensed_directions(
                     sensed_directions, self.umbilical_num_poses
                 )
+            else:
+                possible_s_d = possible_sensed_directions(sensed_directions, 2)
         else:
             raise ValueError(f"Unknown pose kind: {pose_kind}")
 
@@ -417,7 +419,11 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
         return all_possible_locations[1:], all_possible_rotations[1:]
 
     def _get_initial_hypothesis_space(
-        self, channel_features: dict, graph_id: str, input_channel: str, pose_kind: PoseKind
+        self,
+        channel_features: dict,
+        graph_id: str,
+        input_channel: str,
+        pose_kind: PoseKind,
     ) -> Hypotheses:
         if self.initial_possible_poses is None:
             # Get initial poses for all locations informed by pose features
