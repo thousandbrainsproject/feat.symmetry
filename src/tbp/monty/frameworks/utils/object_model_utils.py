@@ -411,7 +411,7 @@ def pose_vector_merge(
     )
 
 
-def pose_vector_mean(
+def surface_pose_vector_mean(
     pose_matrices: np.ndarray, pose_fully_defined: np.ndarray
 ) -> np.ndarray | None:
     """Calculate mean of pose vectors.

@@ -34,7 +34,7 @@ from tbp.monty.frameworks.utils.object_model_utils import (
     get_values_from_dense_last_dim,
     increment_sparse_tensor_by_count,
     object_pose_vector_mean,
-    pose_vector_mean,
+    surface_pose_vector_mean,
     pose_vector_merge,
     remove_close_points,
     torch_graph_to_numpy,
@@ -911,7 +911,7 @@ class GridObjectModel:
             if pose_kind is PoseKind.OBJECT:
                 mean_pose_vector = object_pose_vector_mean(pose_matrices)
             elif pose_kind is PoseKind.SURFACE:
-                mean_pose_vector = pose_vector_mean(pose_matrices, pose_defined)
+                mean_pose_vector = surface_pose_vector_mean(pose_matrices, pose_defined)
             else:
                 raise ValueError(f"Pose kind {pose_kind} not supported.")
         for feature in obs_feat_mappings:
