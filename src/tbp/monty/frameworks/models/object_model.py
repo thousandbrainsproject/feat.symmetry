@@ -34,9 +34,9 @@ from tbp.monty.frameworks.utils.object_model_utils import (
     get_values_from_dense_last_dim,
     increment_sparse_tensor_by_count,
     object_pose_vector_mean,
-    surface_pose_vector_mean,
     pose_vector_merge,
     remove_close_points,
+    surface_pose_vector_mean,
     torch_graph_to_numpy,
 )
 from tbp.monty.frameworks.utils.spatial_arithmetics import apply_rf_transform_to_points

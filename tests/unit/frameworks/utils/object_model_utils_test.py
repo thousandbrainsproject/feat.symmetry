@@ -14,11 +14,12 @@ import numpy as np
 import numpy.typing as npt
 
 from tbp.monty.frameworks.utils.object_model_utils import (
+    as_flat_pose,
     as_pose_matrices,
     object_pose_vector_mean,
     orthonormal_pose_vectors,
-    surface_pose_vector_mean,
     pose_vector_merge,
+    surface_pose_vector_mean,
 )
 from tbp.monty.geometry import Rotation
 from tbp.monty.math import DEFAULT_TOLERANCE
@@ -193,3 +194,20 @@ class PoseVectorsTest(unittest.TestCase):
         # Note for IP: I picked this as an example to "extract" something like
         # surface normal
         np.testing.assert_array_equal(matrices[1, 0], [9.0, 10.0, 11.0])
+
+    def test_as_flat_pose_and_as_pose_matrices_are_inverses(self) -> None:
+        shape1 = ()  # e.g. single pose
+        shape2 = (4,)  # e.g. 4 poses
+        shape3 = (2, 3)  # e.g. 2 hypotheses, 3 nearest neighbors
+        for shape in [shape1, shape2, shape3]:
+            with self.subTest(shape=shape):
+                flat = np.arange(np.prod(shape) * 9).reshape(
+                    *shape, 9
+                )  # (9, ), (4, 9), (2, 3, 9)
+                np.testing.assert_array_equal(
+                    as_flat_pose(as_pose_matrices(flat)), flat
+                )
+                matrices = flat.reshape(*shape, 3, 3)
+                np.testing.assert_array_equal(
+                    as_pose_matrices(as_flat_pose(matrices)), matrices
+                )
