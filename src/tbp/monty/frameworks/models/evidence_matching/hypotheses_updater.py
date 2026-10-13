@@ -259,6 +259,7 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
                     channel_features=features[channel],
                     graph_id=graph_id,
                     input_channel=channel,
+                    pose_kind=pose_kinds[channel],
                 )
                 all_hyps.append(channel_hyps)
                 self._initialized_channels[graph_id].add(channel)
@@ -282,7 +283,7 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
         ]
         if new_channels:
             updated_hypotheses = self._initialize_new_channels(
-                updated_hypotheses, features, new_channels, graph_id
+                updated_hypotheses, features, new_channels, graph_id, pose_kinds
             )
 
         telemetry = {"mlh_prediction_error": displacer_telemetry.mlh_prediction_error}
@@ -294,6 +295,7 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
         features: dict,
         new_channels: list[str],
         graph_id: str,
+        pose_kinds: Mapping[str, PoseKind],
     ) -> Hypotheses:
         """Initialize hypotheses for channels that haven't been seen before.
 
@@ -306,6 +308,7 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
             features: Input features keyed by channel name.
             new_channels: Channels to initialize.
             graph_id: Identifier of the graph being updated.
+            pose_kinds: Kind of pose sent by each input channel.
 
         Returns:
             Hypotheses with new channel hypotheses appended.
@@ -317,6 +320,7 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
                 channel_features=features[channel],
                 graph_id=graph_id,
                 input_channel=channel,
+                pose_kind=pose_kinds[channel],
             )
             # Add current mean evidence to give the new hypotheses a fighting
             # chance against existing hypotheses that have been accumulating
@@ -334,18 +338,24 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
         return Hypotheses.concatenate([hypotheses, *new_hyps])
 
     def _get_all_informed_possible_poses(
-        self, graph_id: str, sensed_channel_features: dict, input_channel: str
+        self,
+        graph_id: str,
+        sensed_channel_features: dict,
+        input_channel: str,
+        pose_kind: PoseKind,
     ):
         """Initialize hypotheses on possible rotations for each location.
 
         This is similar to _get_informed_possible_poses but doesn't require looping
         over nodes.
 
-        For this, we use the surface normal and curvature directions and check how
-        they would have to be rotated to match between sensed and stored vectors
-        at each node. If principal curvature is similar in both directions, the
-        direction vectors cannot inform this and we have to uniformly sample multiple
-        possible rotations along this plane.
+        For this, we check how the sensed pose vectors would have to be rotated to
+        match the stored ones at each node. For surface poses (surface normal and
+        principal curvature directions), the PCs have no sign, so we test both
+        directions. If PC is similar in both directions, the direction vectors cannot
+        inform this, and we have to uniformly sample multiple possible rotations
+        along this plane. Object poses are full, signed orientations, so a single
+        rotation per node aligns them.
 
         Note:
             In general this initialization of hypotheses determines how well the
@@ -353,8 +363,17 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
             should think about whether this is the most robust way to initialize
             hypotheses.
 
+        Args:
+            graph_id: The ID of the graph to initialize hypotheses for.
+            sensed_channel_features: Sensed features of the input channel.
+            input_channel: Input channel to initialize hypotheses for.
+            pose_kind: Kind of pose sent by the input channel.
+
         Returns:
             The possible locations and rotations.
+
+        Raises:
+            ValueError: If the pose kind is unknown.
         """
         all_possible_locations = np.zeros((1, 3))
         all_possible_rotations = np.zeros((1, 3, 3))
@@ -364,16 +383,21 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
             graph_id, input_channel
         )
         sensed_directions = sensed_channel_features["pose_vectors"]
-        # Check if PCs in patch are similar -> need to sample more directions
-        if (
-            "pose_fully_defined" in sensed_channel_features
-            and not sensed_channel_features["pose_fully_defined"]
-        ):
-            possible_s_d = possible_sensed_directions(
-                sensed_directions, self.umbilical_num_poses
-            )
+        if pose_kind is PoseKind.OBJECT:
+            possible_s_d = [sensed_directions]
+        elif pose_kind is PoseKind.SURFACE:
+            # Check if PCs in patch are similar -> need to sample more directions
+            if (
+                "pose_fully_defined" in sensed_channel_features
+                and not sensed_channel_features["pose_fully_defined"]
+            ):
+                possible_s_d = possible_sensed_directions(
+                    sensed_directions, self.umbilical_num_poses
+                )
+            else:
+                possible_s_d = possible_sensed_directions(sensed_directions, 2)
         else:
-            possible_s_d = possible_sensed_directions(sensed_directions, 2)
+            raise ValueError(f"Unknown pose kind: {pose_kind}")
 
         for s_d in possible_s_d:
             # Since we have orthonormal vectors and know their correspondence we can
@@ -395,7 +419,11 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
         return all_possible_locations[1:], all_possible_rotations[1:]
 
     def _get_initial_hypothesis_space(
-        self, channel_features: dict, graph_id: str, input_channel: str
+        self,
+        channel_features: dict,
+        graph_id: str,
+        input_channel: str,
+        pose_kind: PoseKind,
     ) -> Hypotheses:
         if self.initial_possible_poses is None:
             # Get initial poses for all locations informed by pose features
@@ -403,7 +431,7 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
                 initial_possible_channel_locations,
                 initial_possible_channel_rotations,
             ) = self._get_all_informed_possible_poses(
-                graph_id, channel_features, input_channel
+                graph_id, channel_features, input_channel, pose_kind
             )
         else:
             initial_possible_channel_locations = []

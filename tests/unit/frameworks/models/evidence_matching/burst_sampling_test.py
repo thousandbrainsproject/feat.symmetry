@@ -254,7 +254,9 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
         self.updater.sampling_burst_steps = 3
         self.updater.sampling_multiplier = sampling_multiplier
         channel_features = {"pose_fully_defined": pose_fully_defined}
-        num_hyps_per_node = self.updater._num_hyps_per_node(features=channel_features)
+        num_hyps_per_node = self.updater._num_hyps_per_node(
+            features=channel_features, pose_kind=PoseKind.SURFACE
+        )
 
         self.mock_graph_memory.get_input_channels_in_graph = Mock(
             return_value=["patch"]
@@ -270,6 +272,7 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
             graph_id="object1",
             input_channels=["patch"],
             tracker=tracker,
+            pose_kinds={"patch": PoseKind.SURFACE},
         )
 
         sample_count = new_hypotheses_per_channel["patch"]
@@ -307,6 +310,7 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
             graph_id="object1",
             input_channels=["patch"],
             tracker=tracker,
+            pose_kinds={"patch": PoseKind.SURFACE},
         )
 
         self.assertEqual(new_hypotheses_per_channel, {})
@@ -524,14 +528,16 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
     @given(
         pose_fully_defined=st.booleans(),
         num_euler_angles=st.integers(min_value=1, max_value=10),
+        pose_kind=st.sampled_from(list(PoseKind)),
     )
     def test_num_hyps_per_node_with_initial_possible_poses(
-        self, pose_fully_defined: bool, num_euler_angles: int
+        self, pose_fully_defined: bool, num_euler_angles: int, pose_kind: PoseKind
     ) -> None:
         """Test _num_hyps_per_node returns length of initial_possible_poses.
 
         When initial_possible_poses is a list of euler angles, _num_hyps_per_node
-        should return the length of that list regardless of pose_fully_defined.
+        should return the length of that list regardless of pose_fully_defined and
+        pose kind.
         """
         euler_angles = [[0.0, 0.0, i * 30.0] for i in range(num_euler_angles)]
 
@@ -545,7 +551,9 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
         )
 
         self.assertEqual(
-            updater._num_hyps_per_node({"pose_fully_defined": pose_fully_defined}),
+            updater._num_hyps_per_node(
+                {"pose_fully_defined": pose_fully_defined}, pose_kind
+            ),
             num_euler_angles,
         )
 
@@ -560,6 +568,7 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
             graph_id="object1",
             new_hypotheses_per_channel={"patch": 0},
             tracker=tracker,
+            pose_kinds={"patch": PoseKind.SURFACE},
         )
 
         self.assertEqual(result.locations.shape, (0, 3))
@@ -612,6 +621,7 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
             graph_id="object1",
             new_hypotheses_per_channel={"patch": sample_count},
             tracker=tracker,
+            pose_kinds={"patch": PoseKind.SURFACE},
         )
 
         self.assertEqual(result.evidence.shape[0], sample_count)
@@ -684,6 +694,7 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
             graph_id="object1",
             new_hypotheses_per_channel={"patch": sample_count},
             tracker=EvidenceSlopeTracker(),
+            pose_kinds={"patch": PoseKind.SURFACE},
         )
 
         # Should have 4 hypotheses
@@ -738,6 +749,7 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
             graph_id="object1",
             new_hypotheses_per_channel={"patch": sample_count},
             tracker=EvidenceSlopeTracker(),
+            pose_kinds={"patch": PoseKind.SURFACE},
         )
 
         # Verify rotation features were fetched
@@ -794,6 +806,7 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
             graph_id="object1",
             input_channels=channels,
             tracker=EvidenceSlopeTracker(),
+            pose_kinds={"channel_a": PoseKind.SURFACE, "channel_b": PoseKind.SURFACE},
         )
 
         for channel, num_nodes in zip(channels, channel_nodes):
@@ -847,6 +860,7 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
             graph_id="object1",
             new_hypotheses_per_channel={"patch": sample_count},
             tracker=EvidenceSlopeTracker(),
+            pose_kinds={"patch": PoseKind.SURFACE},
         )
 
         self.assertEqual(result.poses.shape[0], sample_count)
@@ -857,3 +871,29 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
         )
         expected_tiled = np.repeat(expected_rot_mats, num_selected_nodes, axis=0)
         np.testing.assert_array_almost_equal(result.poses, expected_tiled, decimal=5)
+
+
+class BurstSamplingPoseKindTest(TestCase):
+    def setUp(self) -> None:
+        self.updater = BurstSamplingHypothesesUpdater(
+            feature_weights={},
+            graph_memory=Mock(),
+            max_match_distance=0,
+            tolerances={},
+            evidence_threshold_config="all",
+        )
+
+    @given(pose_fully_defined=st.booleans())
+    def test_object_pose_samples_one_hypothesis_per_node(
+        self, pose_fully_defined: bool
+    ) -> None:
+        self.assertEqual(
+            self.updater._num_hyps_per_node(
+                {"pose_fully_defined": pose_fully_defined}, PoseKind.OBJECT
+            ),
+            1,
+        )
+
+    def test_unhandled_pose_kind_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            self.updater._num_hyps_per_node({"pose_fully_defined": True}, Mock())
