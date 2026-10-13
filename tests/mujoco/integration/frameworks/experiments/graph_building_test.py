@@ -18,7 +18,7 @@ import hydra
 from omegaconf import DictConfig
 
 from tbp.monty.frameworks.experiments.monty_experiment import MontyExperiment
-from tbp.monty.frameworks.models.object_model import GraphObjectModel
+from tbp.monty.frameworks.models.abstract_monty_classes import ObjectModel
 from tbp.monty.frameworks.utils.graph_matching_utils import get_correct_k_n
 from tbp.monty.hydra import instantiate_experiment
 from tests import HYDRA_ROOT
@@ -72,7 +72,7 @@ class GraphBuildingTest(unittest.TestCase):
         shutil.rmtree(self.mesh_save_path)
 
     def check_graph_formatting(
-        self, graph: GraphObjectModel, features_to_check: list[str]
+        self, graph: ObjectModel, features_to_check: list[str]
     ) -> None:
         # Makes sure graph contains right feature at location information.
         self.assertIsNot(

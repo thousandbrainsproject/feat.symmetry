@@ -34,9 +34,9 @@ from tbp.monty.memento import Memento, Snapshotable
 __all__ = [
     "AgentObservations",
     "GoalGenerator",
-    "LMMemory",
     "LearningModule",
     "Monty",
+    "ObjectMemory",
     "ObjectModel",
     "Observations",
     "RuntimeContext",
@@ -442,42 +442,85 @@ class LearningModule(
         pass
 
 
-class LMMemory(Snapshotable, metaclass=abc.ABCMeta):
-    """Like a long-term memory storing all the knowledge an LM has."""
+class ObjectModel(Protocol):
+    """Read interface of an object model. Stored in ObjectMemory and used by LMs.
 
-    ###
-    # Methods that define the algorithm
-    ###
-    @abc.abstractmethod
-    def update_memory(self, observations):
-        """Update models stored in memory given new observation & classification."""
-        pass
+    How a model is built and updated is specific to each implementation, so
+    build_model and update_model are not part of this protocol.
 
-    ###
-    # Saving, loading
-    ###
+    Note for IP:
+    Return types of x and pos are left unannotated because implementations return
+    either torch tensors or numpy arrays.
+    """
 
-    @abc.abstractmethod
-    def state_dict(self) -> Memento:
-        pass
+    object_id: str
 
-    @abc.abstractmethod
-    def load_state_dict(self, memento: Memento) -> None:
-        pass
+    @property
+    def x(self):
+        """Node features, one row per node. None if no graph is stored yet."""
+        ...
+
+    @property
+    def pos(self):
+        """Node locations, shape (num_nodes, 3). None if no graph is stored yet."""
+        ...
+
+    @property
+    def feature_mapping(self) -> dict[str, list[int]] | None:
+        """Map from feature name to its [start, end) column range in x."""
+        ...
+
+    @property
+    def feature_ids_in_graph(self):
+        """Names of the features stored in the graph."""
+        ...
 
 
-class ObjectModel(metaclass=abc.ABCMeta):
-    """Model of an object. Is stored in Memory and used by LM."""
+class ObjectMemory(Protocol):
+    """Read interface of an LM's memory of object models. Used by LMs and their parts.
 
-    @abc.abstractmethod
-    def build_model(self, observations):
-        """Build a new model."""
-        pass
+    How memory is updated and how initial hypotheses are drawn from it are
+    specific to each implementation, so update_memory and get_initial_hypotheses
+    are not part of this protocol.
+    """
 
-    @abc.abstractmethod
-    def update_model(self, observations):
-        """Update an existing model with new observations."""
-        pass
+    models_in_memory: dict[str, dict[str, ObjectModel]]
+
+    def get_memory_ids(self) -> list[str]:
+        """IDs of all objects stored in memory."""
+        ...
+
+    def get_input_channels_in_graph(self, graph_id: str) -> list[str]:
+        """Input channels that have a model for the given object."""
+        ...
+
+    def get_graph(self, graph_id: str, input_channel: str | None = None) -> Any:
+        """Model of an object, for one channel or for all channels."""
+        ...
+
+    def get_locations_in_graph(self, graph_id: str, input_channel: str) -> np.ndarray:
+        """Node locations of an object's model in one channel."""
+        ...
+
+    def get_features_at_node(
+        self, graph_id, input_channel, node_id, feature_keys=None
+    ) -> dict:
+        """Features stored at the given nodes."""
+        ...
+
+    def get_feature_array(self, graph_id: str) -> dict[str, np.ndarray]:
+        """Per-channel feature arrays of an object, used for fast matching."""
+        ...
+
+    def get_feature_order(self, graph_id: str) -> dict[str, list[str]]:
+        """Per-channel order of the features in get_feature_array."""
+        ...
+
+    def __len__(self) -> int: ...
+
+    def state_dict(self) -> Memento: ...
+
+    def load_state_dict(self, memento: Memento) -> None: ...
 
 
 class GoalGenerator(metaclass=abc.ABCMeta):

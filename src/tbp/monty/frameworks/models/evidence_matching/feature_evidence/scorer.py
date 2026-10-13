@@ -13,6 +13,7 @@ from typing import Protocol
 import numpy as np
 import numpy.typing as npt
 
+from tbp.monty.frameworks.models.abstract_monty_classes import ObjectMemory
 from tbp.monty.frameworks.models.evidence_matching.feature_evidence.calculator import (
     DefaultFeatureEvidenceCalculator,
     FeatureEvidenceCalculator,
@@ -20,9 +21,6 @@ from tbp.monty.frameworks.models.evidence_matching.feature_evidence.calculator i
 from tbp.monty.frameworks.models.evidence_matching.features_for_matching.selector import (  # noqa: E501
     DefaultFeaturesForMatchingSelector,
     FeaturesForMatchingSelector,
-)
-from tbp.monty.frameworks.models.evidence_matching.graph_memory import (
-    EvidenceGraphMemory,
 )
 
 
@@ -67,7 +65,7 @@ class DefaultFeatureEvidenceScorer(FeatureEvidenceScorer):
 
     def __init__(
         self,
-        graph_memory: EvidenceGraphMemory,
+        graph_memory: ObjectMemory,
         feature_weights: dict,
         tolerances: dict,
         feature_evidence_calculator: type[
