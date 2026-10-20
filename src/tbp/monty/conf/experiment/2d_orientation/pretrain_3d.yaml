@@ -7,7 +7,7 @@ defaults:
   - /monty/sensor_module: 3sm_2d3d_dist
   - /monty/connectivity: 3lm_3sm_heterarchy
   - /environment: mujoco_dist_agent_sensors3_256
-  - /env_interface: train_objects_with_stickers_3d_children_predefined
+  - /env_interface: train_cows_3d_children_predefined
   - /env_interface/positioning_procedures_train: getgoodview_viewfinder_patch0
   - /env_interface/transform: gaussianblur_missing_depthto3d_sensor4_256
   - /logging: silent_info_train
@@ -29,4 +29,4 @@ experiment:
     supervised_lm_ids:
       - learning_module_0
     logging:
-      run_name: supervised_pre_training_objects_with_stickers_3d_children_mujoco
+      run_name: supervised_pre_training_cows_3d_children_mujoco

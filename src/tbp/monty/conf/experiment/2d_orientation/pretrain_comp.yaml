@@ -8,7 +8,7 @@ defaults:
   - /monty/connectivity: 3lm_3sm_heterarchy
   - /monty/attention_system: default
   - /environment: mujoco_dist_agent_sensors3_256
-  - /env_interface: train_objects_with_stickers_predefined
+  - /env_interface: train_cows_small_predefined
   - /env_interface/positioning_procedures_train: getgoodview_viewfinder_patch0
   - /env_interface/transform: gaussianblur_missing_depthto3d_sensor4_256
   - /logging: silent_info_train
@@ -22,7 +22,7 @@ experiment:
     max_total_steps: 500
     n_train_epochs: 1 # Changed
     n_eval_epochs: 3
-    model_name_or_path: ${path.expanduser:${oc.env:MONTY_MODELS}/my_trained_models/supervised_pre_training_objects_with_stickers_2d_children/pretrained/}
+    model_name_or_path: ${path.expanduser:${oc.env:MONTY_MODELS}/my_trained_models/supervised_pre_training_cows_small_2d_children/pretrained/}
     match_criterion:
       _target_: tbp.monty.experiment.match_criteria.AnyLMsMatch
       count: 3
@@ -30,7 +30,7 @@ experiment:
     supervised_lm_ids:
       - learning_module_2
     logging:
-      run_name: supervised_pre_training_objects_with_stickers_comp_models_mujoco
+      run_name: supervised_pre_training_cows_small_comp_models_mujoco
     monty_config:
       motor_system_config:
         telemetry:
