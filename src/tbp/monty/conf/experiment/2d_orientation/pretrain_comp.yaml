@@ -22,7 +22,7 @@ experiment:
     max_total_steps: 500
     n_train_epochs: 1 # Changed
     n_eval_epochs: 3
-    model_name_or_path: ${path.expanduser:${oc.env:MONTY_MODELS}/my_trained_models/supervised_pre_training_cows_small_2d_children/pretrained/}
+    model_name_or_path: ${path.expanduser:${oc.env:MONTY_MODELS}/my_trained_models/supervised_pre_training_cows_small_2d_children_mujoco/pretrained/}
     match_criterion:
       _target_: tbp.monty.experiment.match_criteria.AnyLMsMatch
       count: 3
@@ -52,12 +52,12 @@ experiment:
           telemetry:
             _target_: tbp.monty.frameworks.models.evidence_matching.telemetry.NoopEvidenceGraphLMTelemetry
           gsg: null
-        sensor_modules:
-          sensor_module_3:
-            segmentation_strategy:
-              _target_: tbp.monty.frameworks.models.salience.segmentation.slic_merge.SlicMerge
-            snapshot_telemetry:
-              _target_: tbp.monty.frameworks.models.salience.telemetry.NoopSalienceSMTelemetry
-        attention_system:
-          telemetry:
-            _target_: tbp.monty.attention.telemetry.NoopAttentionSystemTelemetry
+      sensor_modules:
+        sensor_module_3:
+          segmentation_strategy:
+            _target_: tbp.monty.frameworks.models.salience.segmentation.slic_merge.SlicMerge
+          snapshot_telemetry:
+            _target_: tbp.monty.frameworks.models.salience.telemetry.NoopSalienceSMTelemetry
+      attention_system:
+        telemetry:
+          _target_: tbp.monty.attention.telemetry.NoopAttentionSystemTelemetry
