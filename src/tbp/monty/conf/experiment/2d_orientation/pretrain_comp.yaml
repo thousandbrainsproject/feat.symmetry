@@ -11,26 +11,52 @@ defaults:
   - /env_interface: train_cows_small_predefined
   - /env_interface/positioning_procedures_train: getgoodview_viewfinder_patch0
   - /env_interface/transform: gaussianblur_missing_depthto3d_sensor4_256
+  # Episode limits and the AnyLMsMatch(count=3) match criterion live here now.
+  # ObjectRecognition keeps matching (so child LMs send their outputs up) until
+  # Monty switches to exploring itself or 250 matching steps pass. 1250 total is
+  # what the old code used: it bumped 500 up to num_exploratory_steps + 250.
+  - /termination: any3_objectrecognition_t250_e500_tot1250
   - /logging: silent_info_train
 
 experiment:
   _target_: tbp.monty.frameworks.experiments.pretraining_experiments.MontySupervisedObjectPretrainingExperiment
   config:
     show_sensor_output: false
-    max_train_steps: 250
-    max_eval_steps: 500
-    max_total_steps: 500
     n_train_epochs: 1 # Changed
     n_eval_epochs: 3
     model_name_or_path: ${path.expanduser:${oc.env:MONTY_MODELS}/my_trained_models/supervised_pre_training_cows_small_2d_children_mujoco/pretrained/}
-    match_criterion:
-      _target_: tbp.monty.experiment.match_criteria.AnyLMsMatch
-      count: 3
     seed: 42
     supervised_lm_ids:
       - learning_module_2
     logging:
       run_name: supervised_pre_training_cows_small_comp_models_mujoco
+    # Overrides train_cows_small_predefined's list: cube and cylinder with logos.
+    train_env_interface_args:
+      # Front view only. run_parallel ignores n_train_epochs and runs one episode
+      # per sampler rotation, so the rotation list itself has to be restricted.
+      object_init_sampler:
+        rotations:
+          - [0, 0, 0]
+      object_names:
+        # - 001_cube
+        # - 006_disk
+        - 002_cube_tbp
+        - 004_cube_numenta
+        # - 007_disk_tbp
+        # - 009_disk_numenta
+        # - 011_cylinder
+        # - 016_sphere
+        # - 023_mug
+        - 012_cylinder_tbp_horz
+        - 014_cylinder_numenta_horz
+        # - 017_sphere_tbp
+        # - 019_sphere_numenta
+        # - 024_mug_tbp_horz
+        # - 026_mug_numenta_horz
+        # - 013_cylinder_tbp_vert
+        # - 015_cylinder_numenta_vert
+        # - 025_mug_tbp_vert
+        # - 027_mug_numenta_vert
     monty_config:
       motor_system_config:
         telemetry:
