@@ -44,7 +44,7 @@ from tbp.monty.frameworks.utils.graph_matching_utils import (
 from tbp.monty.frameworks.utils.spatial_arithmetics import (
     align_multiple_orthonormal_vectors,
 )
-from tbp.monty.geometry import Rotation, SurfacePoseVectors, OrientationMatrix
+from tbp.monty.geometry import OrientationMatrix, Rotation, SurfacePoseVectors
 
 logger = logging.getLogger(__name__)
 

@@ -55,7 +55,7 @@ experiment:
         sensor_modules:
           sensor_module_3:
             segmentation_strategy:
-              _target_: tbp.monty.frameworks.models.salience.segmentation.strategies.slic_merge.SlicMerge
+              _target_: tbp.monty.frameworks.models.salience.segmentation.slic_merge.SlicMerge
             snapshot_telemetry:
               _target_: tbp.monty.frameworks.models.salience.telemetry.NoopSalienceSMTelemetry
         attention_system:
