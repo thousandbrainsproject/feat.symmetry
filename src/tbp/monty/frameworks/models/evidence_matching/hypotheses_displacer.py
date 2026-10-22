@@ -28,6 +28,7 @@ from tbp.monty.frameworks.models.evidence_matching.graph_memory import (
 from tbp.monty.frameworks.models.evidence_matching.hypotheses import Hypotheses
 from tbp.monty.frameworks.utils.graph_matching_utils import (
     get_custom_distances,
+    get_euclidean_distances,
     get_relevant_curvature,
 )
 from tbp.monty.frameworks.utils.spatial_arithmetics import (
@@ -276,18 +277,15 @@ class DefaultHypothesesDisplacer:
             nearest_node_ids = np.expand_dims(nearest_node_ids, axis=1)
 
         nearest_node_locs = channel_locations[nearest_node_ids]
-        max_abs_curvature = get_relevant_curvature(channel_features)
-        custom_nearest_node_dists = get_custom_distances(
-            nearest_node_locs,
-            search_locations,
-            rotated_pose_vectors[:, 0, :],
-            max_abs_curvature,
+        nearest_node_dists = self._nearest_node_distances(
+            predicted_locations=search_locations,
+            nearest_node_locations=nearest_node_locs,
+            rotated_pose_vectors=rotated_pose_vectors,
+            channel_features=channel_features,
         )
         # shape=(H, K)
-        node_distance_weights = self._get_node_distance_weights(
-            custom_nearest_node_dists
-        )
-        # Get IDs where custom_nearest_node_dists > max_match_distance
+        node_distance_weights = self._get_node_distance_weights(nearest_node_dists)
+        # Get IDs where nearest_node_dists > max_match_distance
         mask = node_distance_weights <= 0
 
         new_pos_features = self.graph_memory.get_features_at_node(
@@ -350,6 +348,54 @@ class DefaultHypothesesDisplacer:
         return np.max(
             radius_evidence,  # * node_distance_weights,
             axis=1,
+        )
+
+    @staticmethod
+    def _nearest_node_distances(
+        predicted_locations: npt.NDArray[np.float64],
+        nearest_node_locations: npt.NDArray[np.float64],
+        rotated_pose_vectors: npt.NDArray[np.float64],
+        channel_features: dict[str, Any],
+    ) -> npt.NDArray[np.float64]:
+        """Calculate the distance from each hypothesis to each of its nearest nodes.
+
+        Object orientations have no surface normal to flatten the search sphere along,
+        so they use plain Euclidean distance. Surface poses penalize nodes off the
+        tangent plane, scaled by the sensed curvature.
+
+        Args:
+            predicted_locations: Hypothesized locations, shape (H, 3).
+            nearest_node_locations: Locations of each hypothesis' nearest nodes,
+                shape (H, K, 3).
+            rotated_pose_vectors: Sensed pose vectors rotated by each hypothesis pose,
+                shape (H, 3, 3). Only read for surface poses, where row 0 is the
+                surface normal.
+            channel_features: Sensed features of the input channel. Its
+                "pose_vectors" type selects the distance; curvature is only read for
+                surface poses.
+
+        Returns:
+            Distances, shape (H, K).
+
+        Raises:
+            TypeError: If unsupported pose_vectors type.
+        """
+        # TODO: Replace with match statements
+        if isinstance(channel_features["pose_vectors"], OrientationMatrix):
+            return get_euclidean_distances(
+                predicted_locations=predicted_locations,
+                nearest_node_locations=nearest_node_locations,
+            )
+        if isinstance(channel_features["pose_vectors"], SurfacePoseVectors):
+            return get_custom_distances(
+                predicted_locations=predicted_locations,
+                nearest_node_locations=nearest_node_locations,
+                surface_normals=rotated_pose_vectors[:, 0, :],
+                curvature=get_relevant_curvature(channel_features),
+            )
+        raise TypeError(
+            "Cannot compute distances for type "
+            f"{type(channel_features['pose_vectors'])}"
         )
 
     def _get_node_distance_weights(self, distances):
