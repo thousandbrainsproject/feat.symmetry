@@ -44,7 +44,7 @@ from tbp.monty.frameworks.utils.graph_matching_utils import (
 from tbp.monty.frameworks.utils.spatial_arithmetics import (
     align_multiple_orthonormal_vectors,
 )
-from tbp.monty.geometry import Rotation
+from tbp.monty.geometry import Rotation, SurfacePoseVectors, OrientationMatrix
 
 logger = logging.getLogger(__name__)
 
@@ -335,11 +335,13 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
         This is similar to _get_informed_possible_poses but doesn't require looping
         over nodes.
 
-        For this, we use the surface normal and curvature directions and check how
-        they would have to be rotated to match between sensed and stored vectors
-        at each node. If principal curvature is similar in both directions, the
-        direction vectors cannot inform this and we have to uniformly sample multiple
-        possible rotations along this plane.
+        For this, we check how the sensed pose vectors would have to be rotated to
+        match the stored ones at each node. For surface poses (surface normal and
+        principal curvature directions), the PCs have no sign, so we test both
+        directions. If PC is similar in both directions, the direction vectors cannot
+        inform this, and we have to uniformly sample multiple possible rotations
+        along this plane. Object poses are signed orientations, so a single
+        rotation per node aligns them.
 
         Note:
             In general this initialization of hypotheses determines how well the
@@ -347,8 +349,16 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
             should think about whether this is the most robust way to initialize
             hypotheses.
 
+        Args:
+            graph_id: The ID of the graph to initialize hypotheses for.
+            sensed_channel_features: Sensed features of the input channel.
+            input_channel: Name of input, e.g. patch_0.
+
         Returns:
             The possible locations and rotations.
+
+        Raises:
+            TypeError: If unsupported pose_vectors type.
         """
         all_possible_locations = np.zeros((1, 3))
         all_possible_rotations = np.zeros((1, 3, 3))
@@ -358,17 +368,23 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
             graph_id, input_channel
         )
         sensed_directions = sensed_channel_features["pose_vectors"]
-        # Check if PCs in patch are similar -> need to sample more directions
-        if (
-            "pose_fully_defined" in sensed_channel_features
-            and not sensed_channel_features["pose_fully_defined"]
-        ):
-            possible_s_d = possible_sensed_directions(
-                sensed_directions, self.umbilical_num_poses
-            )
+        if isinstance(sensed_directions, OrientationMatrix):
+            possible_s_d = [sensed_directions.value]
+        elif isinstance(sensed_directions, SurfacePoseVectors):
+            # Check if PCs in patch are similar -> need to sample more directions
+            if (
+                "pose_fully_defined" in sensed_channel_features
+                and not sensed_channel_features["pose_fully_defined"]
+            ):
+                possible_s_d = possible_sensed_directions(
+                    sensed_directions, self.umbilical_num_poses
+                )
+            else:
+                possible_s_d = possible_sensed_directions(sensed_directions, 2)
         else:
-            possible_s_d = possible_sensed_directions(sensed_directions, 2)
-
+            raise TypeError(
+                f"Cannot initialize hypotheses for type {type(sensed_directions)}"
+            )
         for s_d in possible_s_d:
             # Since we have orthonormal vectors and know their correspondence we can
             # directly calculate the rotation instead of using the Kabsch estimate
