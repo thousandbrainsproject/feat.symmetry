@@ -23,7 +23,6 @@ from scipy.spatial import KDTree
 from tbp.monty.cmp import Message, location_mean
 from tbp.monty.context import RuntimeContext
 from tbp.monty.frameworks.experiments.mode import ExperimentMode
-from tbp.monty.frameworks.models.evidence_matching.channels import channel_pose_kinds
 from tbp.monty.frameworks.models.evidence_matching.graph_memory import (
     EvidenceGraphMemory,
 )
@@ -41,7 +40,7 @@ from tbp.monty.frameworks.utils.graph_matching_utils import (
     add_pose_features_to_tolerances,
     get_scaled_evidences,
 )
-from tbp.monty.geometry import Rotation
+from tbp.monty.geometry import OrientationMatrix, Rotation
 from tbp.monty.runtime import is_location_only_step
 
 __all__ = ["EvidenceGraphLM", "InvalidEvidenceThresholdConfig"]
@@ -194,6 +193,12 @@ class EvidenceGraphLM(GraphLM):
             to classify an object as symmetric and go into terminal condition.
 
     Model Attributes:
+        graph_delta_thresholds: Thresholds used to compare nodes in the graphs being
+            learned, and thereby whether to include a new point or not. By default,
+            we only consider the distance between points, using a threshold
+            of 0.001 (determined in remove_close_points). Can also specify
+            thresholds based on e.g. surface normal angle difference, or principal
+            curvature magnitude difference.
         max_graph_size: Maximum size of a graph in meters. Any observations that fall
             out of this range will be discarded/used for building a new model. This
             constrains the size of models that an LM can learn and enforces learning
@@ -245,6 +250,7 @@ class EvidenceGraphLM(GraphLM):
         path_similarity_threshold=0.1,
         pose_similarity_threshold=0.35,
         required_symmetry_evidence=5,
+        graph_delta_thresholds=None,
         max_graph_size=0.3,  # 30cm
         max_nodes_per_graph=2000,
         num_model_voxels_per_dim=50,  # -> voxel size = 6mm3 (0.006)
@@ -258,7 +264,8 @@ class EvidenceGraphLM(GraphLM):
         kwargs["initialize_base_modules"] = False
         super().__init__(*args, **kwargs)
         # --- LM components ---
-        self.graph_memory = EvidenceGraphMemory(  # type: ignore[assignment]
+        self.graph_memory = EvidenceGraphMemory(
+            graph_delta_thresholds=graph_delta_thresholds,
             max_nodes_per_graph=max_nodes_per_graph,
             max_graph_size=max_graph_size,
             num_model_voxels_per_dim=num_model_voxels_per_dim,
@@ -500,8 +507,9 @@ class EvidenceGraphLM(GraphLM):
                         vote = Message(
                             location=graph_hyps.locations[hyp_id],  # location rel. body
                             morphological_features={
-                                # Pose vectors are columns of the rotation matrix
-                                "pose_vectors": graph_hyps.poses[hyp_id].T,
+                                "pose_vectors": OrientationMatrix(
+                                    graph_hyps.poses[hyp_id].T
+                                ),
                                 "pose_fully_defined": True,
                             },
                             non_morphological_features=None,
@@ -941,7 +949,6 @@ class EvidenceGraphLM(GraphLM):
                 features=features,
                 graph_id=graph_id,
                 evidence_update_threshold=update_threshold,
-                pose_kinds=channel_pose_kinds(self.buffer.channel_sender_types),
             )
         )
 
@@ -1025,19 +1032,6 @@ class EvidenceGraphLM(GraphLM):
                 ],
                 axis=0,
             )
-
-    def _graph_update_args(self) -> dict[str, Any]:
-        """Collect the keyword arguments for graph_memory.update_memory.
-
-        Same as GraphLM._graph_update_args, plus each input channel's pose kind so
-        the grid models average pose vectors correctly.
-
-        Returns:
-            Keyword arguments for graph_memory.update_memory.
-        """
-        args = super()._graph_update_args()
-        args["pose_kinds"] = channel_pose_kinds(self.buffer.channel_sender_types)
-        return args
 
     def _check_for_unique_poses(
         self,
@@ -1162,20 +1156,19 @@ class EvidenceGraphLM(GraphLM):
                 hyp.possible[:] = False
         return super().update_terminal_condition()
 
-    def _object_pose_to_features(self, pose):
-        """Turn object rotation into pose feature like vectors.
+    def _object_pose_to_features(self, pose: Rotation | None) -> OrientationMatrix:
+        """Turn object orientation in Rotation into an OrientationMatrix.
 
-        pose is a rotation matrix. We multiply rf spanning unit vectors with rotation.
+        Args:
+            pose: The object's orientation as a Rotation.
 
         Returns:
-            The pose features.
+            The pose as an OrientationMatrix.
         """
         if pose is None:
-            return np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+            return OrientationMatrix(np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]))
 
-        # Equivalent to applying the pose rotation to the rf spanning unit vectors
-        # -> pose.as_matrix().dot(pose_vectors.T).T
-        return pose.as_matrix().T
+        return OrientationMatrix(pose.as_matrix().T)
 
     def _object_id_to_features(self, object_id):
         """Convert an object ID to a stable categorical feature.

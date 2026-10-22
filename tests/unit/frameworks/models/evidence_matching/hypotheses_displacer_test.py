@@ -14,7 +14,6 @@ from unittest.mock import Mock, patch
 import numpy as np
 from scipy.spatial import KDTree
 
-from tbp.monty.frameworks.models.evidence_matching.channels import PoseKind
 from tbp.monty.frameworks.models.evidence_matching.feature_evidence.scorer import (
     DefaultFeatureEvidenceScorer,
 )
@@ -22,7 +21,7 @@ from tbp.monty.frameworks.models.evidence_matching.hypotheses import Hypotheses
 from tbp.monty.frameworks.models.evidence_matching.hypotheses_displacer import (
     DefaultHypothesesDisplacer,
 )
-from tbp.monty.geometry import Rotation
+from tbp.monty.geometry import SurfacePoseVectors
 
 
 class DefaultHypothesesDisplacerTest(TestCase):
@@ -81,11 +80,10 @@ class DefaultHypothesesDisplacerTest(TestCase):
         evidence = self.displacer._calculate_evidence_for_new_locations(
             graph_id="test_object",
             input_channel="channel_a",
-            pose_kind=PoseKind.SURFACE,
             search_locations=np.zeros((1, 3)),
             channel_possible_poses=np.eye(3).reshape(1, 3, 3),
             channel_features={
-                "pose_vectors": np.eye(3),
+                "pose_vectors": SurfacePoseVectors(np.eye(3)),
                 "pose_fully_defined": True,
             },
         )
@@ -138,10 +136,6 @@ class DefaultHypothesesDisplacerTest(TestCase):
                 evidence_update_threshold=-np.inf,
                 graph_id="test_object",
                 hypotheses=displaced,
-                pose_kinds={
-                    "channel_a": PoseKind.SURFACE,
-                    "channel_b": PoseKind.SURFACE,
-                },
             )
 
         # Expected: past_weight * old_evidence + present_weight * summed_new
@@ -180,104 +174,9 @@ class DefaultHypothesesDisplacerTest(TestCase):
                 evidence_update_threshold=-np.inf,
                 graph_id="test_object",
                 hypotheses=displaced,
-                pose_kinds={
-                    "channel_a": PoseKind.SURFACE,
-                    "channel_b": PoseKind.SURFACE,
-                },
             )
 
         # MLH is index 0 (evidence 5.0), summed evidence at MLH = 1.5 + 0.5 = 2.0
         # With 2 channels (C=2), range is [-C, 2C] = [-2, 4], mapped to [0, 1]:
         # prediction_error = (-2.0 + 2*2) / (3*2) = 1/3
         self.assertAlmostEqual(telemetry.mlh_prediction_error, 1 / 3)
-
-    def test_channel_missing_from_pose_kinds_raises(self) -> None:
-        hypotheses = Hypotheses(
-            evidence=np.zeros(1),
-            locations=np.zeros((1, 3)),
-            poses=np.eye(3).reshape(1, 3, 3),
-            possible=np.ones(1, dtype=bool),
-        )
-
-        with patch.object(
-            self.displacer,
-            "_calculate_evidence_for_new_locations",
-            return_value=np.zeros(1),
-        ):
-            with self.assertRaises(KeyError):
-                self.displacer.compute_evidence(
-                    features={
-                        "channel_a": {"pose_fully_defined": True},
-                        "channel_b": {"pose_fully_defined": True},
-                    },
-                    evidence_update_threshold=-np.inf,
-                    graph_id="test_object",
-                    hypotheses=hypotheses,
-                    pose_kinds={"channel_a": PoseKind.SURFACE},
-                )
-
-
-class ObjectPoseEvidenceTest(TestCase):
-    def setUp(self) -> None:
-        self.displacer = DefaultHypothesesDisplacer(
-            feature_weights={},
-            graph_memory=Mock(),
-            max_match_distance=0.01,
-            feature_evidence_scorer=Mock(),
-        )
-
-    def _evidence(self, sensed: Rotation, stored: Rotation) -> float:
-        query_features = {"pose_vectors": sensed.as_matrix().reshape(1, 3, 3)}
-        node_features = {"pose_vectors": stored.as_matrix().reshape(1, 1, 9)}
-        evidence = self.displacer._get_object_pose_evidence_matrix(
-            query_features, node_features
-        )
-        return evidence[0, 0]
-
-    def test_flip_about_first_pose_vector_gives_min_evidence(self) -> None:
-        """The surface pose path would score this as a match."""
-        flipped = Rotation.from_euler("x", 180, degrees=True)
-        self.assertAlmostEqual(self._evidence(flipped, Rotation.identity()), -1.0)
-
-
-class NearestNodeDistancesTest(TestCase):
-    def setUp(self) -> None:
-        self.displacer = DefaultHypothesesDisplacer(
-            feature_weights={},
-            graph_memory=Mock(),
-            max_match_distance=0.01,
-            feature_evidence_scorer=Mock(),
-        )
-
-    def test_object_pose_returns_euclidean_distance(self) -> None:
-        predicted_locations = np.array([[0.0, 0.0, 0.0]])
-        nearest_node_locations = np.array([[[0.01, 0.0, 0.0]]])  # 10 mm away
-        ground_truth_distance = np.array([[0.01]])
-        computed_dist = self.displacer._get_nearest_node_distances(
-            pose_kind=PoseKind.OBJECT,
-            predicted_locations=predicted_locations,
-            nearest_node_locations=nearest_node_locations,
-            pose_transformed_features={},
-            channel_features={},
-        )
-        np.testing.assert_allclose(computed_dist, ground_truth_distance)
-
-    def test_surface_pose_returns_custom_distance(self) -> None:
-        predicted_locations = np.array([[0.0, 0.0, 0.0]])
-        nearest_node_locations = np.array([[[0.01, 0.0, 0.0]]])  # 10 mm away
-        pose_transformed_features = {
-            "pose_vectors": np.identity(3).reshape(
-                1, 3, 3
-            ),  # Surface normal is [1, 0, 0]
-        }
-        channel_features = {"principal_curvatures_log": np.zeros(2)}
-        # euclidean distance + dot * 1/(curv + 0.5) = 0.01 + 0.01 / 0.5 = 0.03
-        ground_truth_distance = np.array([[0.03]])
-        computed_dist = self.displacer._get_nearest_node_distances(
-            pose_kind=PoseKind.SURFACE,
-            predicted_locations=predicted_locations,
-            nearest_node_locations=nearest_node_locations,
-            pose_transformed_features=pose_transformed_features,
-            channel_features=channel_features,
-        )
-        np.testing.assert_allclose(computed_dist, ground_truth_distance)
