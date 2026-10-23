@@ -492,3 +492,28 @@ class TwoDSensorModuleTangentFrameTest(unittest.TestCase):
         np.testing.assert_allclose(
             outputs[2].displacement["displacement"], [0.0, 2.0, 0.0]
         )
+
+    def test_message_carries_tangent_to_world_rotation(self):
+        two_d_sm = make_2d_sm(edge_detector=Mock(return_value=make_no_edge()))
+        normal = np.array([np.sqrt(0.5), 0.0, np.sqrt(0.5)])
+        tangent = np.array([0.0, 1.0, 0.0])
+        two_d_sm._observation_processor.process = Mock(
+            return_value=make_message(
+                pose_vectors=SurfacePoseVectors(
+                    np.array([normal, tangent, np.cross(normal, tangent)])
+                )
+            )
+        )
+
+        message = two_d_sm.step(
+            ctx=RuntimeContext(rng=np.random.RandomState()),
+            observation=sentinel.raw_observation,
+            motor_only_step=False,
+        )
+
+        frame = two_d_sm._tangent_frame
+
+        # Note for IP: If the Tangent-to-World were stacked as rows this would fail.
+        np.testing.assert_allclose(message.sensor_to_world @ [1, 0, 0], frame.basis_u)
+        np.testing.assert_allclose(message.sensor_to_world @ [0, 1, 0], frame.basis_v)
+        np.testing.assert_allclose(message.sensor_to_world @ [0, 0, 1], normal)

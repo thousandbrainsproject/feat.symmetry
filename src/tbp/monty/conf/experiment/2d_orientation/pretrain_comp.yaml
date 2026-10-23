@@ -29,7 +29,7 @@ experiment:
     supervised_lm_ids:
       - learning_module_2
     logging:
-      run_name: supervised_pre_training_cows_small_comp_models_mujoco
+      run_name: pretrain_comp_idea1
     # Overrides train_cows_small_predefined's list: cube and cylinder with logos.
     train_env_interface_args:
       # Front view only. run_parallel ignores n_train_epochs and runs one episode
@@ -58,6 +58,10 @@ experiment:
         # - 025_mug_tbp_vert
         # - 027_mug_numenta_vert
     monty_config:
+      monty_args:
+        # LM2 must pair LM1's output with the location it was computed at; with
+        # the default one-step lag it gets the previous point's tangent frame.
+        same_step_lm_outputs: true
       motor_system_config:
         telemetry:
           _target_: tbp.monty.frameworks.models.motor_system_telemetry.NoopMotorSystemTelemetry

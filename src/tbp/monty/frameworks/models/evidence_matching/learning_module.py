@@ -34,7 +34,6 @@ from tbp.monty.frameworks.models.evidence_matching.hypotheses_updater import (
     HypothesesUpdater,
     HypothesesUpdaterTelemetry,
 )
-
 from tbp.monty.frameworks.models.evidence_matching.region_proposal.context import (
     EvidenceLMRegionContext,
 )
@@ -382,6 +381,7 @@ class EvidenceGraphLM(GraphLM):
     def _init_EvidenceGraphLM(self) -> None:  # noqa: N802
         self.symmetry_evidence = 0
         self._hypotheses = {}
+        self._sensor_to_world = Rotation.identity()
 
         # Efferent copy of a goal of this LM the motor system attempted but
         # whose outcome the LM has not yet judged from its sensory input.
@@ -424,6 +424,7 @@ class EvidenceGraphLM(GraphLM):
 
     def propose_region(self) -> AttentionRegion | None:
         """Collect the regions this LM's region proposers emit.
+
         Returns:
             The concatenated proposals of every configured region proposer,
             evaluated against the LM's current recognition state (its goals
@@ -458,7 +459,8 @@ class EvidenceGraphLM(GraphLM):
         # buffer, so the sensed displacement is measured from the location at
         # which the goal was generated.
         self._evaluate_pending_goal_attempt(percepts)
-        
+        self._update_sensor_to_world(percepts)
+
         if is_location_only_step(percepts):
             self._displace_hypotheses(percepts)
             return
@@ -498,6 +500,7 @@ class EvidenceGraphLM(GraphLM):
         `failed_goal_displacement_eta` are ignored, since a successful jump
         would then be indistinguishable from a failed one (which produces a
         near-zero displacement).
+
         Args:
             goal: The goal the motor system attempted.
         """
@@ -532,6 +535,7 @@ class EvidenceGraphLM(GraphLM):
         evidence of the hypothesis that proposed the jump is decremented by
         present_weight * failed_goal_evidence_penalty. On success nothing
         extra happens; evidence matching proceeds in the normal way.
+
         Args:
             percepts: The percepts of this matching step.
         """
@@ -584,6 +588,8 @@ class EvidenceGraphLM(GraphLM):
         percepts: Sequence[Message],
     ) -> None:
         """Step without trying to recognize object (updating possible matches)."""
+        self._update_sensor_to_world(percepts)
+
         if is_location_only_step(percepts):
             self._displace_hypotheses(percepts)
             return
@@ -726,7 +732,10 @@ class EvidenceGraphLM(GraphLM):
         recognized object's stored points.
         """
         mlh = self._get_current_mlh()
-        pose_features = self._object_pose_to_features(mlh["rotation"].inv())
+        # pose_features = self._object_pose_to_features(mlh["rotation"].inv())
+        pose_features = self._object_pose_to_features(
+            self._sensor_to_world * mlh["rotation"].inv()
+        )
         object_id_features = self._object_id_to_features(mlh["graph_id"])
         pass_message = bool(
             self.buffer.get_currently_on_object()
@@ -894,6 +903,20 @@ class EvidenceGraphLM(GraphLM):
         if mlh["mlh_id"] is not None and graph_id in self._hypotheses:
             mlh["location"] = self._hypotheses[graph_id].locations[mlh["mlh_id"]]
         return mlh
+
+    def _update_sensor_to_world(self, percepts: Sequence[Message]) -> None:
+        """Keep the latest input-frame-to-world rotation from this LM's SM.
+
+        Args:
+            percepts: This step's input messages.
+        """
+        frames = [
+            p.sensor_to_world
+            for p in percepts
+            if p.is_from_sm() and p.sensor_to_world is not None
+        ]
+        if frames:
+            self._sensor_to_world = Rotation.from_matrix(frames[0])
 
     def get_mlh_for_object(self, object_id):
         """Get mlh for a specific object ID.
@@ -1364,9 +1387,11 @@ class EvidenceGraphLM(GraphLM):
 
     def _mlh_on_model(self, mlh) -> bool:
         """Whether the MLH location lies near the stored points of its object.
+
         Args:
             mlh: The most likely hypothesis, with ``graph_id`` and ``location``
                 in the object's reference frame.
+
         Returns:
             True if the location is within output_max_model_distance of the
             nearest stored point in any of the object's input channels; False
