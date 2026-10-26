@@ -72,7 +72,8 @@ class HypothesesUpdater(ContextManager[Self], Protocol):
             hypotheses: Hypothesis space for the graph.
             displacement: LM displacement between the current and previous input.
             graph_id: ID of the graph being updated.
-            frame_delta: (3, 3) change of the input frame since the last step
+            frame_delta: (3, 3) change of the input frame since the last step,
+                F_{t-1} @ F_t.T. None means the frame didn't change.
 
         Returns:
             The displaced hypothesis space.
@@ -219,17 +220,28 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
         hypotheses: Hypotheses,
         displacement: npt.NDArray[np.float64] | None,
         graph_id: str,  # noqa: ARG002
-        frame_delta: npt.NDArrray[np.float64] | None = None
+        frame_delta: npt.NDArray[np.float64] | None = None,
     ) -> Hypotheses:
-        """
+        """Displace existing hypothesis locations by the sensed displacement.
+
         Args:
-            frame_delta: (3, 3) change of the input frame since the last step
+            hypotheses: Hypothesis space for the graph.
+            displacement: LM displacement between the current and previous input.
+            graph_id: ID of the graph being updated.
+            frame_delta: (3, 3) change of the input frame since the last step,
+                F_{t-1} @ F_t.T. None means the frame didn't change.
+
+        Returns:
+            The displaced hypothesis space.
         """
-        if hypotheses.count == 0 or displacement is None:
+        if hypotheses.count == 0 or (displacement is None and frame_delta is None):
             return hypotheses
         if displacement is None:
+            # A frame change without movement still rotates the poses.
             displacement = np.zeros(3)
-        return self._hypotheses_displacer.displace_hypotheses(displacement, hypotheses, frame_delta=frame_delta)
+        return self._hypotheses_displacer.displace_hypotheses(
+            displacement, hypotheses, frame_delta=frame_delta
+        )
 
     def update_evidence(
         self,

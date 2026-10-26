@@ -424,6 +424,7 @@ def location_mean(messages: Sequence[Message]) -> npt.NDArray[np.float64] | None
 
 def goals_to_columns(goals: Sequence[Goal]) -> dict[str, np.ndarray]:
     """One step's goals as columns, for telemetry.
+
     Thousands of goals a step are far cheaper to keep, write and read as a
     few arrays than as ``Goal`` objects.
 
