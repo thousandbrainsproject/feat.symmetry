@@ -61,6 +61,7 @@ class HypothesesUpdater(ContextManager[Self], Protocol):
         hypotheses: Hypotheses,
         displacement: npt.NDArray[np.float64] | None,
         graph_id: str,
+        frame_delta: npt.NDArray[np.float64] | None = None,
     ) -> Hypotheses:
         """Displace existing hypothesis locations by the sensed displacement.
 
@@ -71,6 +72,7 @@ class HypothesesUpdater(ContextManager[Self], Protocol):
             hypotheses: Hypothesis space for the graph.
             displacement: LM displacement between the current and previous input.
             graph_id: ID of the graph being updated.
+            frame_delta: (3, 3) change of the input frame since the last step
 
         Returns:
             The displaced hypothesis space.
@@ -217,10 +219,17 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
         hypotheses: Hypotheses,
         displacement: npt.NDArray[np.float64] | None,
         graph_id: str,  # noqa: ARG002
+        frame_delta: npt.NDArrray[np.float64] | None = None
     ) -> Hypotheses:
+        """
+        Args:
+            frame_delta: (3, 3) change of the input frame since the last step
+        """
         if hypotheses.count == 0 or displacement is None:
             return hypotheses
-        return self._hypotheses_displacer.displace_hypotheses(displacement, hypotheses)
+        if displacement is None:
+            displacement = np.zeros(3)
+        return self._hypotheses_displacer.displace_hypotheses(displacement, hypotheses, frame_delta=frame_delta)
 
     def update_evidence(
         self,

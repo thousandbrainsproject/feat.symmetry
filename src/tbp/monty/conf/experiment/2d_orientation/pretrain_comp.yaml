@@ -58,6 +58,8 @@ experiment:
         # - 025_mug_tbp_vert
         # - 027_mug_numenta_vert
     monty_config:
+      monty_args:
+        same_step_lm_outputs: true
       motor_system_config:
         telemetry:
           _target_: tbp.monty.frameworks.models.motor_system_telemetry.NoopMotorSystemTelemetry
