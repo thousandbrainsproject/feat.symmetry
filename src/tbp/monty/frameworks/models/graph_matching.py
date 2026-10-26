@@ -231,6 +231,11 @@ class MontyForGraphMatching(MontyBase):
                 self.learning_modules[i].add_lm_processing_to_buffer_stats(
                     lm_processed=not is_location_only_step(sensory_inputs)
                 )
+                if self.same_step_lm_outputs:
+                    # Parents later in this loop see what this LM inferred from
+                    # the current sensation, not the previous one.
+                    learning_module = self.learning_modules[i]
+                    self.learning_module_outputs[i] = learning_module.get_output()
             else:
                 if self.step_type == "matching_step":
                     logger.info(f"Skipping step on learning module {i}")

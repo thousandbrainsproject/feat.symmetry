@@ -13,6 +13,7 @@ import datetime
 import logging
 import logging.config
 import pprint
+import resource
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -523,8 +524,6 @@ class MontyExperiment:
             actions = self.run_step(ctx, count.step, actions)
             count.step += 1
             if count.step % 50 == 0:
-                import resource
-
                 logger.info(
                     "step=%d exploring=%d matching=%d maxrss=%.0f MB",
                     count.step,

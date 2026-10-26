@@ -48,6 +48,8 @@ class Message:
             as a location-only message that only syncs the receiver's sense of the
             sensor location. Note that the message may still carry features even when
             this is False (e.g. so the motor system can use them).
+        sensor_to_world: (3, 3) rotation from the sender's input frame to world;
+            the columns are the input frame's axes in world. None means identity.
     """
 
     def __init__(
@@ -72,6 +74,7 @@ class Message:
         self.sender_id = sender_id
         self.sender_type = sender_type
         self.process_features_in_lm = process_features_in_lm
+        self.sensor_to_world: npt.NDArray[np.float64] | None = None
         self._set_allowable_sender_types()
         if self.process_features_in_lm:
             self._check_all_attributes()
@@ -144,6 +147,18 @@ class Message:
         }
         if ppf is not None:
             self.displacement["ppf"] = ppf
+
+    def set_sensor_to_world(
+        self, sensor_to_world: npt.NDArray[np.float64] | None
+    ) -> None:
+        """Attach the rotation from the sender's input frame to world.
+
+        Args:
+            sensor_to_world: (3, 3) rotation whose columns are the input frame's
+                axes in world, so `sensor_to_world @ v_input = v_world`. None
+                means identity.
+        """
+        self.sensor_to_world = sensor_to_world
 
     def get_feature_by_name(self, feature_name):
         if feature_name in self.morphological_features:
@@ -409,6 +424,7 @@ def location_mean(messages: Sequence[Message]) -> npt.NDArray[np.float64] | None
 
 def goals_to_columns(goals: Sequence[Goal]) -> dict[str, np.ndarray]:
     """One step's goals as columns, for telemetry.
+
     Thousands of goals a step are far cheaper to keep, write and read as a
     few arrays than as ``Goal`` objects.
 
@@ -436,6 +452,7 @@ def goals_to_columns(goals: Sequence[Goal]) -> dict[str, np.ndarray]:
 # freshly attended location is proposed at MAX_ATTENTION_WEIGHT.
 MIN_ATTENTION_WEIGHT = -1.0
 MAX_ATTENTION_WEIGHT = 1.0
+
 
 @dataclass(frozen=True)
 class AttentionRegion:

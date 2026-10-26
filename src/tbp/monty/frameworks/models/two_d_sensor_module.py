@@ -10,9 +10,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
+import numpy.typing as npt
 import quaternion as qt
 
 from tbp.monty.cmp import Message
@@ -87,6 +88,7 @@ class TwoDSensorModule(SensorModule):
         edge_detector: EdgeDetector | None = None,
         noise_params: dict[str, Any] | None = None,
         delta_thresholds: dict[str, Any] | None = None,
+        output_frame: Literal["tangent", "world"] = "tangent",
     ) -> None:
         """Initialize 2D Sensor Module.
 
@@ -106,6 +108,12 @@ class TwoDSensorModule(SensorModule):
                 check whether the current state's features are significantly different
                 from the previous with tolerances set according to `delta_thresholds`.
                 Defaults to None.
+            output_frame: Frame of the message's location, pose, and displacement.
+                "tangent" (default) sends flattened tangent-frame values; "world"
+                sends world location and pose, and the arc-corrected step in world.
+
+        Raises:
+            ValueError: If `output_frame` is not "tangent" or "world".
         """
         self._observation_processor = ObservationProcessor(
             features=features,
@@ -144,6 +152,10 @@ class TwoDSensorModule(SensorModule):
         self._previous_3d_location: np.ndarray | None = None
         self._previous_2d_location: np.ndarray = np.zeros(2)
         self._tangent_frame: TangentFrame | None = None
+
+        if output_frame not in ("tangent", "world"):
+            raise ValueError("output_frame must be in 'tangent' or 'world'.")
+        self._output_frame = output_frame
 
     def reset(self) -> None:
         self._snapshot_telemetry.reset()
@@ -219,12 +231,31 @@ class TwoDSensorModule(SensorModule):
             observed_state, curvature_pose_vectors, true_surface_normal
         )
 
+        if self._tangent_frame is not None:
+            # Tangent to World Rotation. The tangent axes are columns.
+            # Stacking them as rows would give world -> tangent.
+            observed_state.set_sensor_to_world(self._frame_matrix())
+
         observed_state = self._percept_filter(observed_state)
 
         if not self.is_exploring:
             self.processed_obs.append(observed_state.__dict__)
 
         return observed_state
+
+    def _frame_matrix(self) -> npt.NDArray[np.float64]:
+        """Tangent-to-world rotation; its columns are u, v, n in world.
+
+        Returns:
+            (3, 3) rotation matrix with the tangent frame's axes as columns.
+        """
+        return np.column_stack(
+            [
+                self._tangent_frame.basis_u,
+                self._tangent_frame.basis_v,
+                self._tangent_frame.normal,
+            ]
+        )
 
     def _extract_2d_edge(
         self,
@@ -279,6 +310,8 @@ class TwoDSensorModule(SensorModule):
             surface_normal=surface_normal_3d,
             tangent_frame=self._tangent_frame,
         )
+        if self._output_frame == "world":
+            pose_2d = SurfacePoseVectors(pose_2d.value @ self._frame_matrix().T)
 
         state.morphological_features["pose_vectors"] = pose_2d
         state.morphological_features["pose_fully_defined"] = True
@@ -319,10 +352,11 @@ class TwoDSensorModule(SensorModule):
         if self._previous_3d_location is None or surface_normal_3d is None:
             self._previous_3d_location = current_3d_location
             self._previous_2d_location = current_3d_location[:2].copy()
-            observed_state.location = np.array(
-                # Setting z = 0 assumes that camera is aligned with world xy.
-                [current_3d_location[0], current_3d_location[1], 0.0]
-            )
+            if self._output_frame == "tangent":
+                observed_state.location = np.array(
+                    # Setting z = 0 assumes that camera is aligned with world xy.
+                    [current_3d_location[0], current_3d_location[1], 0.0]
+                )
             return observed_state
 
         displacement_3d = current_3d_location - self._previous_3d_location
@@ -331,14 +365,15 @@ class TwoDSensorModule(SensorModule):
         if np.linalg.norm(d_tan) < DEFAULT_TOLERANCE:
             self._previous_3d_location = current_3d_location
             observed_state.set_displacement(np.zeros(3))
-            observed_state.location = np.array(
-                # See previous comment on setting z = 0.
-                [
-                    self._previous_2d_location[0],
-                    self._previous_2d_location[1],
-                    0.0,
-                ]
-            )
+            if self._output_frame == "tangent":
+                observed_state.location = np.array(
+                    # See previous comment on setting z = 0.
+                    [
+                        self._previous_2d_location[0],
+                        self._previous_2d_location[1],
+                        0.0,
+                    ]
+                )
             return observed_state
 
         du = np.dot(d_tan, self._tangent_frame.basis_u)
@@ -360,12 +395,17 @@ class TwoDSensorModule(SensorModule):
 
         self._previous_2d_location += [du, dv]
         self._previous_3d_location = current_3d_location
-        observed_state.set_displacement(np.array([du, dv, 0.0]))
-        observed_state.location = np.array(
-            [
-                self._previous_2d_location[0],
-                self._previous_2d_location[1],
-                0.0,
-            ]
-        )
+        # observed_state.set_displacement(np.array([du, dv, 0.0]))
+        displacement = np.array([du, dv, 0.0])
+        if self._output_frame == "world":
+            displacement = self._frame_matrix() @ displacement
+        observed_state.set_displacement(displacement)
+        if self._output_frame == "tangent":
+            observed_state.location = np.array(
+                [
+                    self._previous_2d_location[0],
+                    self._previous_2d_location[1],
+                    0.0,
+                ]
+            )
         return observed_state

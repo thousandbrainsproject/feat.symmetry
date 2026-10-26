@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 from scipy.spatial import KDTree
+from scipy.spatial.transform import Rotation
 
 from tbp.monty.frameworks.models.evidence_matching.feature_evidence.scorer import (
     DefaultFeatureEvidenceScorer,
@@ -180,3 +181,58 @@ class DefaultHypothesesDisplacerTest(TestCase):
         # With 2 channels (C=2), range is [-C, 2C] = [-2, 4], mapped to [0, 1]:
         # prediction_error = (-2.0 + 2*2) / (3*2) = 1/3
         self.assertAlmostEqual(telemetry.mlh_prediction_error, 1 / 3)
+
+
+class DefaultHypothesesDisplacerFrameDeltaTest(TestCase):
+    def setUp(self) -> None:
+        self.displacer = DefaultHypothesesDisplacer(
+            feature_weights={},
+            graph_memory=Mock(),
+            max_match_distance=0.01,
+            feature_evidence_scorer=Mock(),
+        )
+        # Input -> model poses for two hypotheses; non-symmetric on purpose.
+        poses = np.stack(
+            [
+                Rotation.from_euler("xyz", [5, 15, 25], degrees=True).as_matrix(),
+                Rotation.from_euler("xyz", [-30, 10, 60], degrees=True).as_matrix(),
+            ]
+        )
+        self.hypotheses = Hypotheses(
+            evidence=np.array([1.0, 2.0]),
+            locations=np.array([[0.0, 0.0, 0.0], [0.01, -0.02, 0.03]]),
+            poses=poses,
+            possible=np.array([True, True]),
+        )
+        self.displacement = np.array([0.003, -0.001, 0.002])
+        # Tangent -> world frames at t-1 and t; also non-symmetric.
+        f0 = Rotation.from_euler("xyz", [10, -25, 5], degrees=True).as_matrix()
+        f1 = Rotation.from_euler("xyz", [-15, 40, 20], degrees=True).as_matrix()
+        self.frame_delta = f0 @ f1.T
+
+    def test_frame_delta_right_multiplies_poses_before_displacing(self) -> None:
+        displaced = self.displacer.displace_hypotheses(
+            self.displacement, self.hypotheses, frame_delta=self.frame_delta
+        )
+
+        expected_poses = self.hypotheses.poses @ self.frame_delta
+        np.testing.assert_allclose(displaced.poses, expected_poses)
+        np.testing.assert_allclose(
+            displaced.locations,
+            self.hypotheses.locations + expected_poses @ self.displacement,
+        )
+        # The left-multiplied (transposed) update is a different rotation.
+        self.assertFalse(
+            np.allclose(displaced.poses, self.frame_delta @ self.hypotheses.poses)
+        )
+
+    def test_no_frame_delta_matches_plain_displacement(self) -> None:
+        displaced = self.displacer.displace_hypotheses(
+            self.displacement, self.hypotheses, frame_delta=None
+        )
+
+        np.testing.assert_array_equal(displaced.poses, self.hypotheses.poses)
+        np.testing.assert_allclose(
+            displaced.locations,
+            self.hypotheses.locations + self.hypotheses.poses @ self.displacement,
+        )

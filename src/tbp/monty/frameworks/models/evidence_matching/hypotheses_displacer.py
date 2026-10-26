@@ -144,15 +144,31 @@ class DefaultHypothesesDisplacer:
         self,
         displacement: npt.NDArray[np.float64],
         hypotheses: Hypotheses,
+        frame_delta: npt.NDArray[np.float64] | None = None,
     ) -> Hypotheses:
+        """Displace hypothesis locations using the sensed sensor displacement.
+
+        Args:
+            displacement: Displacement of the sensor (in common RF).
+            hypotheses: Hypotheses to displace.
+            frame_delta: (3, 3) change of the input frame since the last step,
+                F_{t-1} @ F_t.T. Poses are right-multiplied by it before the
+                displacement is rotated. None means the frame didn't change.
+
+        Returns:
+            Hypotheses with displaced locations.
+        """
         # Have to do this for all hypotheses so we don't lose the path information
         # https://docs.thousandbrains.org/docs/glossary#path-integration
-        rotated_displacements = hypotheses.poses.dot(displacement)
+        poses = (
+            hypotheses.poses if frame_delta is None else hypotheses.poses @ frame_delta
+        )
+        rotated_displacements = poses.dot(displacement)
         search_locations = hypotheses.locations + rotated_displacements
         return Hypotheses(
             evidence=hypotheses.evidence,
             locations=search_locations,
-            poses=hypotheses.poses,
+            poses=poses,
             possible=hypotheses.possible,
         )
 
