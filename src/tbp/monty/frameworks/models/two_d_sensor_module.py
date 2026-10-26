@@ -219,6 +219,19 @@ class TwoDSensorModule(SensorModule):
             observed_state, curvature_pose_vectors, true_surface_normal
         )
 
+        if self._tangent_frame is not None:
+            # Tangent to World Rotation. The tangent axes are columns.
+            # Stacking them as rows would give world -> tangent.
+            observed_state.set_sensor_to_world(
+                np.column_stack(
+                    [
+                        self._tangent_frame.basis_u,
+                        self._tangent_frame.basis_v,
+                        self._tangent_frame.normal,
+                    ]
+                )
+            )
+
         observed_state = self._percept_filter(observed_state)
 
         if not self.is_exploring:
