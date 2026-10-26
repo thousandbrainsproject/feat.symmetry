@@ -10,14 +10,13 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
 from tbp.monty.frameworks.models.evidence_matching.channels import (
-    PoseKind,
     all_usable_input_channels,
 )
 from tbp.monty.frameworks.models.evidence_matching.evidence_slope_tracker import (
@@ -56,6 +55,7 @@ from tbp.monty.frameworks.utils.graph_matching_utils import (
 from tbp.monty.frameworks.utils.spatial_arithmetics import (
     align_multiple_orthonormal_vectors,
 )
+from tbp.monty.geometry import OrientationMatrix, SurfacePoseVectors
 
 
 @dataclass
@@ -307,7 +307,6 @@ class BurstSamplingHypothesesUpdater:
         features: dict,
         graph_id: str,
         evidence_update_threshold: float,
-        pose_kinds: Mapping[str, PoseKind],
     ) -> tuple[Hypotheses | None, HypothesesUpdateTelemetry]:
         """Update hypothesis evidence from sensed features via burst sampling.
 
@@ -321,8 +320,6 @@ class BurstSamplingHypothesesUpdater:
             features: Input features keyed by channel name.
             graph_id: Identifier of the graph being updated.
             evidence_update_threshold: Evidence update threshold.
-            pose_kinds: Kind of pose sent by each input channel. Must contain every
-                usable channel in `features`.
 
         Returns:
             A tuple containing the updated hypotheses (or None if no channels available)
@@ -353,7 +350,6 @@ class BurstSamplingHypothesesUpdater:
             graph_id=graph_id,
             input_channels=input_channels_to_use,
             tracker=tracker,
-            pose_kinds=pose_kinds,
         )
 
         existing_hypotheses = self._sample_existing_hypotheses(
@@ -366,7 +362,6 @@ class BurstSamplingHypothesesUpdater:
             graph_id=graph_id,
             new_hypotheses_per_channel=new_hypotheses_per_channel,
             tracker=tracker,
-            pose_kinds=pose_kinds,
         )
 
         # The existing hypotheses were already displaced by the LM before sampling, so
@@ -378,7 +373,6 @@ class BurstSamplingHypothesesUpdater:
                     evidence_update_threshold=evidence_update_threshold,
                     graph_id=graph_id,
                     hypotheses=existing_hypotheses,
-                    pose_kinds=pose_kinds,
                 )
             )
         else:
@@ -417,28 +411,29 @@ class BurstSamplingHypothesesUpdater:
 
         return hypotheses_update, telemetry
 
-    def _num_hyps_per_node(self, features: dict[str, Any], pose_kind: PoseKind) -> int:
+    def _num_hyps_per_node(self, features: dict[str, Any]) -> int:
         """Calculate the number of hypotheses per node.
 
         Args:
             features: Features for the input channel.
-            pose_kind: Kind of pose sent by the input channel.
 
         Returns:
             The number of hypotheses per node.
 
         Raises:
-            ValueError: If the pose kind is unknown.
+            TypeError: If unsupported pose_vectors type.
         """
         if self.initial_possible_poses is not None:
             return len(self.initial_possible_poses)
 
-        if pose_kind is PoseKind.OBJECT:
-            # A full, signed orientation aligns with a stored one in exactly one way.
+        if isinstance(features["pose_vectors"], OrientationMatrix):
+            # A signed orientation aligns with stored in exactly one way.
             return 1
-        if pose_kind is PoseKind.SURFACE:
+        if isinstance(features["pose_vectors"], SurfacePoseVectors):
             return 2 if features["pose_fully_defined"] else self.umbilical_num_poses
-        raise ValueError(f"Unknown pose kind: {pose_kind}")
+        raise TypeError(
+            f"Cannot sample hypotheses for type {type(features['pose_vectors'])}"
+        )
 
     def _sample_count(
         self,
@@ -446,7 +441,6 @@ class BurstSamplingHypothesesUpdater:
         graph_id: str,
         input_channels: list[str],
         tracker: EvidenceSlopeTracker,
-        pose_kinds: Mapping[str, PoseKind],
     ) -> tuple[HypothesesSelection, dict[str, int]]:
         """Calculates the number of existing and new hypotheses needed.
 
@@ -456,7 +450,6 @@ class BurstSamplingHypothesesUpdater:
             input_channels: Usable input channels for this graph.
             tracker: Slope tracker for the evidence values of a
                 graph_id
-            pose_kinds: Kind of pose sent by each input channel.
 
         Returns:
             A tuple containing the hypotheses selection and a dictionary mapping
@@ -485,9 +478,7 @@ class BurstSamplingHypothesesUpdater:
                 num_nodes = self.graph_memory.get_locations_in_graph(
                     graph_id, channel
                 ).shape[0]
-                num_hyps_per_node = self._num_hyps_per_node(
-                    features[channel], pose_kinds[channel]
-                )
+                num_hyps_per_node = self._num_hyps_per_node(features[channel])
 
                 # This makes sure that we do not request more than the available
                 # number of new hypotheses
@@ -562,7 +553,6 @@ class BurstSamplingHypothesesUpdater:
         graph_id: str,
         new_hypotheses_per_channel: dict[str, int],
         tracker: EvidenceSlopeTracker,
-        pose_kinds: Mapping[str, PoseKind],
     ) -> Hypotheses:
         """Samples new hypotheses based on the current observation.
 
@@ -593,7 +583,6 @@ class BurstSamplingHypothesesUpdater:
                 ``_sample_count``.
             tracker: Slope tracker for the evidence values of a
                 graph_id
-            pose_kinds: Kind of pose sent by each input channel.
 
         Returns:
             The newly sampled hypotheses.
@@ -609,7 +598,6 @@ class BurstSamplingHypothesesUpdater:
                     count=sample_count,
                     graph_id=graph_id,
                     input_channel=channel,
-                    pose_kind=pose_kinds[channel],
                 )
             )
 
@@ -630,7 +618,6 @@ class BurstSamplingHypothesesUpdater:
         count: int,
         graph_id: str,
         input_channel: str,
-        pose_kind: PoseKind,
     ) -> Hypotheses:
         """Sample new hypotheses from a single channel's graph.
 
@@ -639,15 +626,11 @@ class BurstSamplingHypothesesUpdater:
             count: Number of hypotheses to sample from this channel.
             graph_id: Identifier of the graph being queried.
             input_channel: The channel to sample from.
-            pose_kind: Kind of pose sent by this channel.
 
         Returns:
             Hypotheses sampled from this channel.
-
-        Raises:
-            ValueError: If the pose kind is unknown.
         """
-        num_hyps_per_node = self._num_hyps_per_node(features, pose_kind)
+        num_hyps_per_node = self._num_hyps_per_node(features)
         # === Calculate selected evidence by top-k indices === #
         node_feature_evidence = self._feature_evidence_scorer(
             graph_id=graph_id,
@@ -683,14 +666,12 @@ class BurstSamplingHypothesesUpdater:
                 )[top_indices]
             )
             sensed_directions = features["pose_vectors"]
-            if pose_kind is PoseKind.OBJECT:
-                possible_s_d = [sensed_directions]
-            elif pose_kind is PoseKind.SURFACE:
+            if isinstance(sensed_directions, OrientationMatrix):
+                possible_s_d = [sensed_directions.value]
+            else:
                 possible_s_d = possible_sensed_directions(
                     sensed_directions, num_hyps_per_node
                 )
-            else:
-                raise ValueError(f"Unknown pose kind: {pose_kind}")
             selected_rotations = np.vstack(
                 [
                     align_multiple_orthonormal_vectors(

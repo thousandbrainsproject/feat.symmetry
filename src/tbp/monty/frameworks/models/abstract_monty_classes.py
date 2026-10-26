@@ -32,9 +32,9 @@ from tbp.monty.observations import SensorObservation
 __all__ = [
     "AgentObservations",
     "GoalGenerator",
+    "LMMemory",
     "LearningModule",
     "Monty",
-    "ObjectMemory",
     "ObjectModel",
     "Observations",
     "RuntimeContext",
@@ -341,6 +341,20 @@ class RuntimeLearningModule(Protocol):
         """
         ...
 
+    def receive_goal_attempt(self, goal: Goal) -> None:
+        """Receive an efferent copy of a goal of this LM the motor system attempted.
+
+        Called when the motor system began executing a goal-driven movement
+        (e.g. a hypothesis-testing jump) toward a goal proposed by this LM's
+        GSG. The signal carries no information about the movement's outcome;
+        the LM can combine it with its subsequent sensory input to judge
+        whether the attempt succeeded.
+
+        Args:
+            goal: The goal the motor system attempted.
+        """
+        ...
+
     def get_output(self) -> Message | None:
         """Return learning module output (same format as input)."""
         ...
@@ -405,6 +419,22 @@ class LearningModule(
     def propose_goals(self) -> list[Goal]:
         pass
 
+    def receive_goal_attempt(self, goal: Goal) -> None:
+        """Receive an efferent copy of a goal of this LM the motor system attempted.
+
+        By default this signal is ignored. LMs that use goal-driven movements
+        (e.g. hypothesis-testing jumps) can override this to combine the
+        efferent copy with subsequent sensory input, e.g. to detect failed
+        jumps and accumulate negative evidence for the hypothesis that
+        proposed the goal.
+
+        Args:
+            goal: The goal the motor system attempted.
+        """
+
+    def propose_region(self) -> AttentionRegion | None:
+        return AttentionRegion.empty()
+
     @abc.abstractmethod
     def get_output(self) -> Message | None:
         pass
@@ -426,85 +456,42 @@ class LearningModule(
         pass
 
 
-class ObjectModel(Protocol):
-    """Read interface of an object model. Stored in ObjectMemory and used by LMs.
+class LMMemory(Snapshotable, metaclass=abc.ABCMeta):
+    """Like a long-term memory storing all the knowledge an LM has."""
 
-    How a model is built and updated is specific to each implementation, so
-    build_model and update_model are not part of this protocol.
+    ###
+    # Methods that define the algorithm
+    ###
+    @abc.abstractmethod
+    def update_memory(self, observations):
+        """Update models stored in memory given new observation & classification."""
+        pass
 
-    Note for IP:
-    Return types of x and pos are left unannotated because implementations return
-    either torch tensors or numpy arrays.
-    """
+    ###
+    # Saving, loading
+    ###
 
-    object_id: str
+    @abc.abstractmethod
+    def state_dict(self) -> Memento:
+        pass
 
-    @property
-    def x(self):
-        """Node features, one row per node. None if no graph is stored yet."""
-        ...
-
-    @property
-    def pos(self):
-        """Node locations, shape (num_nodes, 3). None if no graph is stored yet."""
-        ...
-
-    @property
-    def feature_mapping(self) -> dict[str, list[int]] | None:
-        """Map from feature name to its [start, end) column range in x."""
-        ...
-
-    @property
-    def feature_ids_in_graph(self):
-        """Names of the features stored in the graph."""
-        ...
+    @abc.abstractmethod
+    def load_state_dict(self, memento: Memento) -> None:
+        pass
 
 
-class ObjectMemory(Protocol):
-    """Read interface of an LM's memory of object models. Used by LMs and their parts.
+class ObjectModel(metaclass=abc.ABCMeta):
+    """Model of an object. Is stored in Memory and used by LM."""
 
-    How memory is updated and how initial hypotheses are drawn from it are
-    specific to each implementation, so update_memory and get_initial_hypotheses
-    are not part of this protocol.
-    """
+    @abc.abstractmethod
+    def build_model(self, observations):
+        """Build a new model."""
+        pass
 
-    models_in_memory: dict[str, dict[str, ObjectModel]]
-
-    def get_memory_ids(self) -> list[str]:
-        """IDs of all objects stored in memory."""
-        ...
-
-    def get_input_channels_in_graph(self, graph_id: str) -> list[str]:
-        """Input channels that have a model for the given object."""
-        ...
-
-    def get_graph(self, graph_id: str, input_channel: str | None = None) -> Any:
-        """Model of an object, for one channel or for all channels."""
-        ...
-
-    def get_locations_in_graph(self, graph_id: str, input_channel: str) -> np.ndarray:
-        """Node locations of an object's model in one channel."""
-        ...
-
-    def get_features_at_node(
-        self, graph_id, input_channel, node_id, feature_keys=None
-    ) -> dict:
-        """Features stored at the given nodes."""
-        ...
-
-    def get_feature_array(self, graph_id: str) -> dict[str, np.ndarray]:
-        """Per-channel feature arrays of an object, used for fast matching."""
-        ...
-
-    def get_feature_order(self, graph_id: str) -> dict[str, list[str]]:
-        """Per-channel order of the features in get_feature_array."""
-        ...
-
-    def __len__(self) -> int: ...
-
-    def state_dict(self) -> Memento: ...
-
-    def load_state_dict(self, memento: Memento) -> None: ...
+    @abc.abstractmethod
+    def update_model(self, observations):
+        """Update an existing model with new observations."""
+        pass
 
 
 class GoalGenerator(metaclass=abc.ABCMeta):

@@ -2,9 +2,9 @@
 
 match_criterion:
   _target_: tbp.monty.experiment.match_criteria.AnyLMsMatch
-  count: 1
+  count: 3
 recognition_policy:
   _target_: tbp.monty.experiment.recognition_policy.ObjectRecognition
-  max_train_steps: 1000
-  max_eval_steps: 100
-  max_total_steps: 5000
+  max_train_steps: 250
+  max_eval_steps: 500
+  max_total_steps: 1250
