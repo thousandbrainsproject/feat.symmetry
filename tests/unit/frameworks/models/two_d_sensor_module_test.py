@@ -499,7 +499,9 @@ class TwoDSensorModuleTangentFrameTest(unittest.TestCase):
         )
 
     def test_message_carries_tangent_to_world_rotation(self):
-        two_d_sm = make_2d_sm(edge_detector=Mock(return_value=make_no_edge()))
+        two_d_sm = make_2d_sm(
+            edge_detector=Mock(return_value=make_no_edge()), output_frame="world"
+        )
         normal = np.array([np.sqrt(0.5), 0.0, np.sqrt(0.5)])
         tangent = np.array([0.0, 1.0, 0.0])
         two_d_sm._observation_processor.process = Mock(
@@ -613,3 +615,16 @@ class TwoDSensorModuleTangentFrameTest(unittest.TestCase):
     def test_rejects_unknown_output_frame(self):
         with self.assertRaises(ValueError):
             make_2d_sm(output_frame="bogus")
+
+    def test_tangent_mode_sends_no_frame(self):
+        two_d_sm = make_2d_sm(edge_detector=Mock(return_value=make_no_edge()))
+        two_d_sm._observation_processor.process = Mock(return_value=make_message())
+
+        message = two_d_sm.step(
+            ctx=RuntimeContext(rng=np.random.RandomState()),
+            observation=sentinel.raw_observation,
+            motor_only_step=False,
+        )
+
+        self.assertIsNotNone(two_d_sm._tangent_frame)
+        self.assertIsNone(message.sensor_to_world)

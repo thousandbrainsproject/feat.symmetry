@@ -382,6 +382,11 @@ class EvidenceGraphLM(GraphLM):
         self.symmetry_evidence = 0
         self._hypotheses = {}
 
+        # Input frame (tangent -> world) of a world-frame SM at the last step,
+        # and this step's change F_{t-1} @ F_t^T. None when no SM sends a frame.
+        self._last_frame: npt.NDArray[np.float64] | None = None
+        self._frame_delta: npt.NDArray[np.float64] | None = None
+
         # Efferent copy of a goal of this LM the motor system attempted but
         # whose outcome the LM has not yet judged from its sensory input.
         self._pending_goal_attempt: Goal | None = None
@@ -458,6 +463,7 @@ class EvidenceGraphLM(GraphLM):
         # buffer, so the sensed displacement is measured from the location at
         # which the goal was generated.
         self._evaluate_pending_goal_attempt(percepts)
+        self._update_frame(percepts)
 
         if is_location_only_step(percepts):
             self._displace_hypotheses(percepts)
@@ -588,6 +594,8 @@ class EvidenceGraphLM(GraphLM):
         percepts: Sequence[Message],
     ) -> None:
         """Step without trying to recognize object (updating possible matches)."""
+        self._update_frame(percepts)
+
         if is_location_only_step(percepts):
             self._displace_hypotheses(percepts)
             return
@@ -1079,11 +1087,74 @@ class EvidenceGraphLM(GraphLM):
             self.previous_mlh = self.current_mlh
             self.current_mlh = self._calculate_most_likely_hypothesis()
 
+    def _update_frame(self, percepts: Sequence[Message]) -> None:
+        """Set this step's frame change from the SM's input frame.
+
+        Runs on every step, location-only steps included, before any hypotheses
+        are displaced. The change F_{t-1} @ F_t^T telescopes, so steps on which
+        this LM gets no input don't lose rotation.
+
+        Args:
+            percepts: This step's input messages.
+        """
+        frames = [
+            p.sensor_to_world
+            for p in percepts
+            if p.is_from_sm() and p.sensor_to_world is not None
+        ]
+        if not frames:
+            self._frame_delta = None
+            return
+        frame = frames[0]
+        self._frame_delta = (
+            None if self._last_frame is None else self._last_frame @ frame.T
+        )
+        self._last_frame = frame
+
+    @staticmethod
+    def _sm_displacement(
+        sm_percepts: Sequence[Message],
+    ) -> npt.NDArray[np.float64] | None:
+        """The world displacement a frame-carrying SM sent, or None to fall back.
+
+        Args:
+            sm_percepts: This step's percepts from sensor modules.
+
+        Returns:
+            The SM-supplied displacement, or None if the SM sends no frame or no
+            displacement (then the LM differences locations, as before).
+        """
+        if not sm_percepts or sm_percepts[0].sensor_to_world is None:
+            return None
+        displacement = getattr(sm_percepts[0], "displacement", None)
+        return None if displacement is None else displacement["displacement"]
+
+    def _add_displacements(self, percepts: Sequence[Message]) -> Sequence[Message]:
+        """Use a world-frame SM's own displacement, else difference locations.
+
+        A world-frame SM (one that sends `sensor_to_world`) sends the
+        arc-corrected step in world, which differencing world locations would
+        replace with the chord.
+
+        Args:
+            percepts: Percepts to add displacements to.
+
+        Returns:
+            Percepts with displacements.
+        """
+        sm_displacement = self._sm_displacement([p for p in percepts if p.is_from_sm()])
+        if sm_displacement is None:
+            return super()._add_displacements(percepts)
+        for p in percepts:
+            p.set_displacement(sm_displacement)
+        return percepts
+
     def _displace_hypotheses(self, percepts: Sequence[Message]) -> None:
         """Displace all hypotheses by the movement since the last location.
 
         Evidence is not changed, so the MLH identity is invariant under displacement.
-        Updates `self.buffer.last_location` to the current location.
+        Poses are first rotated by this step's frame change, if any. Updates
+        `self.buffer.last_location` to the current (world) location.
 
         Args:
             percepts: Percepts for the current location-only step.
@@ -1096,10 +1167,12 @@ class EvidenceGraphLM(GraphLM):
         assert current_location is not None, (
             "Should have at least one sensor module percept with location"
         )
-        displacement = current_location - self.buffer.last_location
+        displacement = self._sm_displacement(sm_percepts)
+        if displacement is None:
+            displacement = current_location - self.buffer.last_location
         for graph_id, hypotheses in self._hypotheses.items():
             self._hypotheses[graph_id] = self.hypotheses_updater.displace_hypotheses(
-                hypotheses, displacement, graph_id
+                hypotheses, displacement, graph_id, frame_delta=self._frame_delta
             )
         self.buffer.last_location = current_location.copy()
 
@@ -1137,7 +1210,10 @@ class EvidenceGraphLM(GraphLM):
         )
 
         displaced_hypotheses = self.hypotheses_updater.displace_hypotheses(
-            self._hypotheses[graph_id], displacement, graph_id
+            self._hypotheses[graph_id],
+            displacement,
+            graph_id,
+            frame_delta=self._frame_delta,
         )
         hypotheses_update, hypotheses_update_telemetry = (
             self.hypotheses_updater.update_evidence(

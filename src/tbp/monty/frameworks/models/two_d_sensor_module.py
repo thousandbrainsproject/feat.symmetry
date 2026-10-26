@@ -231,9 +231,10 @@ class TwoDSensorModule(SensorModule):
             observed_state, curvature_pose_vectors, true_surface_normal
         )
 
-        if self._tangent_frame is not None:
+        if self._output_frame == "world" and self._tangent_frame is not None:
             # Tangent to World Rotation. The tangent axes are columns.
-            # Stacking them as rows would give world -> tangent.
+            # Stacking them as rows would give world -> tangent. Only world mode
+            # sends it: the LM reads a frame as "this SM reports in world".
             observed_state.set_sensor_to_world(self._frame_matrix())
 
         observed_state = self._percept_filter(observed_state)
