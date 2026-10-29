@@ -1,0 +1,19 @@
+# @package _global_
+
+# eval_2d_vote with idea 4's world-frame 2D SMs: they send world location and
+# pose plus the tangent-to-world frame, and the LMs rotate their hypotheses with
+# the frame. Only runs on the idea4 branch (idea 1's TwoDSensorModule has no
+# output_frame argument).
+defaults:
+  - /experiment/2d_orientation/eval_2d_vote
+
+experiment:
+  config:
+    monty_config:
+      sensor_modules:
+        sensor_module_0:
+          output_frame: world
+        sensor_module_1:
+          output_frame: world
+    logging:
+      run_name: eval_2d_vote_world
