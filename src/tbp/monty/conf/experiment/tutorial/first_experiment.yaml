@@ -24,19 +24,19 @@ defaults:
 
   # /monty/sensor_module is Monty's sensor module configuration. We use a sensor
   # module that handles input from a camera.
-  - /monty/sensor_module: camera_dist
+  - /monty/sensor_module: camera_dist_raw0
 
   # /monty/connectivity is the connectivity between the learning modules and
   # the sensor modules. We connect one sensor module with one learning module.
   - /monty/connectivity: 1lm_1sm
 
   # /environment specifies the environment configuration to use. We use a
-  # Habitat simulator environment, loaded with the YCB dataset, and Monty
+  # MuJoCo simulator environment, loaded with the YCB dataset, and Monty
   # controls a "distant" agent. Distant agent is like an eye, looking at things
   # from a distance.
-  - /environment: habitat_ycb_dist_agent_semantics0
+  - /environment: mujoco_ycb_dist_agent
 
-  # /env_interface specifies how to setup the enviromment for the experiment.
+  # /env_interface specifies how to set up the environment for the experiment.
   # We will train on one object and use a predefined rotation for placement of
   # one object.
   - /env_interface: tutorial_train_1obj_predefined
@@ -51,9 +51,8 @@ defaults:
 
   # /termination specifies when an episode ends. The match criterion decides
   # which learning modules must recognize the object, and the recognition
-  # policy adds step limits. We stop once any one learning module has matched,
-  # or after 20 steps exploring, or 6000 total steps.
-  - /termination: any1_train_steps_3_20_tot6000
+  # policy adds step limits.
+  - /termination: any1_min_e0_t0_exp3_max_e1_t1_tot5
 
   # /logging specifies the logging configuration to use. We tell Monty to use
   # the SILENT data logging mode, Python to use the WARNING log level, and we
