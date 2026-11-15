@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 import unittest
-from typing import Any, Callable, Literal
+from collections.abc import Callable
+from typing import Any, Literal
 from unittest.mock import Mock, sentinel
 
 import numpy as np
@@ -562,7 +563,7 @@ class TwoDSensorModuleTangentFrameTest(unittest.TestCase):
 
         messages = self._run_on_tilted_plane(locations)
 
-        for message, location in zip(messages, locations):
+        for message, location in zip(messages, locations, strict=True):
             np.testing.assert_allclose(message.location, location)
 
     def test_displacement_is_in_plane_world_step(self):
