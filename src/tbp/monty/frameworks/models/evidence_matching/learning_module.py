@@ -34,7 +34,6 @@ from tbp.monty.frameworks.models.evidence_matching.hypotheses_updater import (
     HypothesesUpdater,
     HypothesesUpdaterTelemetry,
 )
-
 from tbp.monty.frameworks.models.evidence_matching.region_proposal.context import (
     EvidenceLMRegionContext,
 )
@@ -453,7 +452,7 @@ class EvidenceGraphLM(GraphLM):
         # buffer, so the sensed displacement is measured from the location at
         # which the goal was generated.
         self._evaluate_pending_goal_attempt(percepts)
-        
+
         if is_location_only_step(percepts):
             self._displace_hypotheses(percepts)
             return
@@ -485,6 +484,7 @@ class EvidenceGraphLM(GraphLM):
 
     def receive_goal_attempt(self, goal: Goal) -> None:
         """Register that the motor system attempted a goal proposed by this LM.
+
         The efferent copy carries no information about the movement's outcome.
         Instead, the LM judges success itself on its next sensed location by
         comparing the displacement it senses against the displacement the goal
@@ -493,6 +493,7 @@ class EvidenceGraphLM(GraphLM):
         `failed_goal_displacement_eta` are ignored, since a successful jump
         would then be indistinguishable from a failed one (which produces a
         near-zero displacement).
+
         Args:
             goal: The goal the motor system attempted.
         """
@@ -515,6 +516,7 @@ class EvidenceGraphLM(GraphLM):
 
     def _evaluate_pending_goal_attempt(self, percepts: Sequence[Message]) -> None:
         """Judge the outcome of a pending goal attempt from sensory input.
+
         Called at the start of a matching step, before the buffer is updated
         with this step's percepts. If a goal attempt (hypothesis-testing jump)
         is pending, the sensed displacement since the goal was generated is
@@ -527,6 +529,7 @@ class EvidenceGraphLM(GraphLM):
         evidence of the hypothesis that proposed the jump is decremented by
         present_weight * failed_goal_evidence_penalty. On success nothing
         extra happens; evidence matching proceeds in the normal way.
+
         Args:
             percepts: The percepts of this matching step.
         """
@@ -1359,9 +1362,11 @@ class EvidenceGraphLM(GraphLM):
 
     def _mlh_on_model(self, mlh) -> bool:
         """Whether the MLH location lies near the stored points of its object.
+
         Args:
             mlh: The most likely hypothesis, with ``graph_id`` and ``location``
                 in the object's reference frame.
+
         Returns:
             True if the location is within output_max_model_distance of the
             nearest stored point in any of the object's input channels; False
