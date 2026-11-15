@@ -950,6 +950,7 @@ class AdvancedPolicyTest(unittest.TestCase):
             "target_surface_normal": np.array([0.0, 1.0, 0.0]),
             "hypothesis_to_test": {
                 "graph_id": "dummy_object",
+                "mlh_id": None,
                 "location": np.array([0.1, 0.1, 0.1]),
                 "rotation": Rotation.from_euler(
                     "xyz", object_orientation, degrees=True

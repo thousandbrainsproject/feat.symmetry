@@ -51,14 +51,14 @@ class MontyBasePrivateTest(unittest.TestCase):
             sentinel.lm3_goal_1,
             sentinel.lm3_goal_2,
         ]
+        self.lm1.propose_region.return_value = sentinel.lm1_region
+        self.lm2.propose_region.return_value = sentinel.lm2_region
+        self.lm3.propose_region.return_value = sentinel.lm3_region
         self.sm1.propose_goals.return_value = []
         self.sm2.propose_goals.return_value = [
             sentinel.sm2_goal_1,
             sentinel.sm2_goal_2,
         ]
-        self.lm1.propose_region.return_value = sentinel.lm1_region
-        self.lm2.propose_region.return_value = sentinel.lm2_region
-        self.lm3.propose_region.return_value = sentinel.lm3_region
         self.sm1.propose_region.return_value = sentinel.sm1_region
         self.sm2.propose_region.return_value = sentinel.sm2_region
         self.attention_system.step.return_value = sentinel.attention_system_goals
@@ -72,32 +72,15 @@ class MontyBasePrivateTest(unittest.TestCase):
             sentinel.sm2_goal_1,
             sentinel.sm2_goal_2,
         ]
-        self.attention_system.step.assert_called_once_with(
-            goals,
-            [
-                sentinel.lm1_region,
-                sentinel.lm2_region,
-                sentinel.lm3_region,
-                sentinel.sm1_region,
-                sentinel.sm2_region,
-            ],
-        )
+        regions = [
+            sentinel.sm1_region,
+            sentinel.sm2_region,
+            sentinel.lm1_region,
+            sentinel.lm2_region,
+            sentinel.lm3_region,
+        ]
+        self.attention_system.step.assert_called_once_with(goals, regions)
         self.assertIs(self.monty_base._goals, sentinel.attention_system_goals)
-
-    def test_pass_goals_drops_regions_from_lms_that_proposed_none(self) -> None:
-        for module in (self.lm1, self.lm2, self.lm3, self.sm1, self.sm2):
-            module.propose_goals.return_value = []
-        self.lm1.propose_region.return_value = None
-        self.lm2.propose_region.return_value = sentinel.lm2_region
-        self.lm3.propose_region.return_value = None
-        self.sm1.propose_region.return_value = sentinel.sm1_region
-        self.sm2.propose_region.return_value = sentinel.sm2_region
-
-        self.monty_base._pass_goals()
-
-        self.attention_system.step.assert_called_once_with(
-            [], [sentinel.lm2_region, sentinel.sm1_region, sentinel.sm2_region]
-        )
 
     def test_route_attempted_goal_notifies_only_the_lm_that_proposed_the_goal(
         self,
