@@ -1,0 +1,49 @@
+# @package experiment.config.environment
+
+# Two 2D patches (zoom 30, like patch_1 in mujoco_dist_agent_sensors3_256) for
+# 2D voting. patch_1 is offset along agent x, which is the curved direction of
+# the *_horz cylinders (their axis is world y, radius 0.05). Both patches look
+# along the same direction, so the true sensor offset is exactly this vector.
+env_init_args:
+  data_path: ${path.expanduser:${oc.env:MONTY_DATA}/mujoco/objects/compositional_objects}
+  agents:
+    - _target_: tbp.monty.simulators.mujoco.agents.DistantAgent
+      _partial_: true
+      agent_id: agent_id_0
+      sensor_configs:
+        patch_0:
+          _target_: tbp.monty.frameworks.sensors.SensorConfig
+          resolution:
+            width: 64
+            height: 64
+          position:
+            - 0.0
+            - 0.0
+            - 0.0
+          zoom: 30.0
+        patch_1:
+          _target_: tbp.monty.frameworks.sensors.SensorConfig
+          resolution:
+            width: 64
+            height: 64
+          position:
+            - 0.02
+            - 0.0
+            - 0.0
+          zoom: 30.0
+        view_finder:
+          _target_: tbp.monty.frameworks.sensors.SensorConfig
+          resolution:
+            width: 256
+            height: 256
+          position:
+            - 0.0
+            - 0.0
+            - 0.0
+          zoom: 1.0
+      position:
+        - 0.0
+        - 1.5
+        - 0.2
+  raise_actuate_missing: false
+env_init_func: ${monty.class:tbp.monty.simulators.mujoco.MuJoCoSimulator}
