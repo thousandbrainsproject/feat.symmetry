@@ -486,6 +486,7 @@ class EvidenceGraphLM(GraphLM):
 
     def receive_goal_attempt(self, goal: Goal) -> None:
         """Register that the motor system attempted a goal proposed by this LM.
+
         The efferent copy carries no information about the movement's outcome.
         Instead, the LM judges success itself on its next sensed location by
         comparing the displacement it senses against the displacement the goal
@@ -517,6 +518,7 @@ class EvidenceGraphLM(GraphLM):
 
     def _evaluate_pending_goal_attempt(self, percepts: Sequence[Message]) -> None:
         """Judge the outcome of a pending goal attempt from sensory input.
+
         Called at the start of a matching step, before the buffer is updated
         with this step's percepts. If a goal attempt (hypothesis-testing jump)
         is pending, the sensed displacement since the goal was generated is

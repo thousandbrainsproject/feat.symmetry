@@ -1,0 +1,43 @@
+# @package experiment.config.monty_config.learning_modules
+
+# Two copies of the 2D LM (learning_module_1 in evidence_3lm_heterarchy), each
+# keyed by its own sensor. No goal-state generator, so the scan policy alone
+# decides where the sensors go. Single-threaded so breakpoints in
+# _update_evidence_with_vote are hit in order.
+defaults:
+  - hypotheses_updater/burst_sampling_10nn@learning_module_0
+  - hypotheses_updater/burst_sampling_10nn@learning_module_1
+
+learning_module_0:
+  _target_: tbp.monty.frameworks.models.evidence_matching.learning_module.EvidenceGraphLM
+  feature_weights:
+    patch_0:
+      hsv: ${np.array:[1, 0.5, 0.5]}
+      pose_vectors: ${np.array:[0, 2, 1]}
+  tolerances:
+    patch_0:
+      hsv: ${np.array:[0.1, 0.2, 0.2]}
+  max_match_distance: 0.025
+  x_percent_threshold: 20
+  evidence_threshold_config: all
+  max_graph_size: 0.1
+  num_model_voxels_per_dim: 100
+  use_multithreading: false
+  gsg: null
+
+learning_module_1:
+  _target_: tbp.monty.frameworks.models.evidence_matching.learning_module.EvidenceGraphLM
+  feature_weights:
+    patch_1:
+      hsv: ${np.array:[1, 0.5, 0.5]}
+      pose_vectors: ${np.array:[0, 2, 1]}
+  tolerances:
+    patch_1:
+      hsv: ${np.array:[0.1, 0.2, 0.2]}
+  max_match_distance: 0.025
+  x_percent_threshold: 20
+  evidence_threshold_config: all
+  max_graph_size: 0.1
+  num_model_voxels_per_dim: 100
+  use_multithreading: false
+  gsg: null

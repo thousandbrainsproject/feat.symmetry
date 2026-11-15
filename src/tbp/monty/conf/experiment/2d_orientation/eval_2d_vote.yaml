@@ -1,0 +1,33 @@
+# @package _global_
+
+# Two 2D LMs voting on the logo while the sensors scan a cube (flat control) or
+# a horizontal cylinder (logo wrapped around the curved x direction). Uses
+# tangent mode, i.e. idea 1. For idea 4 use eval_2d_vote_world.
+#
+# Votes are not saved to the stats. Run with python_log_level=DEBUG to get the
+# per-step sensor displacement between the LMs (_combine_votes), or set a
+# breakpoint in EvidenceGraphLM._update_evidence_with_vote.
+defaults:
+  - /monty: evidencegraph_exp1000_e3_t3
+  - /monty/motor_system_config: naive_scan_1
+  - /monty/learning_module: evidence_2lm_2d
+  - /monty/sensor_module: 2sm_2d_dist
+  - /monty/connectivity: 2lm_2sm_vote
+  - /environment: mujoco_dist_agent_2d_sensors2_256
+  - /env_interface: eval_cows_small_2d_vote_predefined
+  - /env_interface/positioning_procedures_eval: getgoodview_viewfinder_patch0
+  - /env_interface/transform: gaussianblur_missing_depthto3d_2d_sensor3_256
+  - /termination: any2_objectrecognition_t1000_e500_tot6000
+  - /logging: detailed_info_evidence_eval_runs
+
+experiment:
+  _target_: tbp.monty.frameworks.experiments.object_recognition_experiments.MontyObjectRecognitionExperiment
+  config:
+    show_sensor_output: false
+    n_train_epochs: 1 # unused but required
+    n_eval_epochs: 1
+    model_name_or_path: ${path.expanduser:${oc.env:MONTY_MODELS}/my_trained_models/pretrain_2d_2lm/pretrained/}
+    seed: 42
+    supervised_lm_ids: []
+    logging:
+      run_name: eval_2d_vote
