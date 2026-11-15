@@ -28,9 +28,6 @@ sensor_module_0:
 sensor_module_1:
   _target_: tbp.monty.frameworks.models.two_d_sensor_module.TwoDSensorModule
   sensor_module_id: patch_1
-  # Idea 4: send world location, world edge pose, the arc-corrected step in world
-  # and the tangent frame; LM1 rotates its hypotheses with the frame.
-  output_frame: world
   save_raw_obs: false
   edge_detector:
     _target_: tbp.monty.frameworks.utils.edge_detection.EdgeDetector

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import logging
 import threading
@@ -50,7 +51,7 @@ from tbp.monty.frameworks.utils.graph_matching_utils import (
     add_pose_features_to_tolerances,
     get_scaled_evidences,
 )
-from tbp.monty.geometry import OrientationMatrix, Rotation
+from tbp.monty.geometry import OrientationMatrix, Rotation, SurfacePoseVectors
 from tbp.monty.memento import Memento
 from tbp.monty.runtime import is_location_only_step
 
@@ -382,10 +383,18 @@ class EvidenceGraphLM(GraphLM):
         self.symmetry_evidence = 0
         self._hypotheses = {}
 
-        # Input frame (tangent -> world) of a world-frame SM at the last step,
+        # Input frame -> world of the SM feeding this LM at the last step,
         # and this step's change F_{t-1} @ F_t^T. None when no SM sends a frame.
         self._last_frame: npt.NDArray[np.float64] | None = None
         self._frame_delta: npt.NDArray[np.float64] | None = None
+        # Location x̂ in the SM's input frame, integrated from its world steps
+        # (x̂ = F_0^T @ y_0, then x̂ += F_t^T @ l^W). Used only for what the buffer
+        # stores, so graphs are built in the input frame. None until a frame
+        # arrives; without one the input frame is world.
+        self._input_frame_location: npt.NDArray[np.float64] | None = None
+        # World location and pose rows of the first SM channel at the last buffer
+        # append, kept for votes once the buffer holds input-frame values (step 6).
+        self._world_sensed_pose: npt.NDArray[np.float64] | None = None
 
         # Efferent copy of a goal of this LM the motor system attempted but
         # whose outcome the LM has not yet judged from its sensory input.
@@ -464,6 +473,7 @@ class EvidenceGraphLM(GraphLM):
         # which the goal was generated.
         self._evaluate_pending_goal_attempt(percepts)
         self._update_frame(percepts)
+        self._update_input_frame_location(percepts)
 
         if is_location_only_step(percepts):
             self._displace_hypotheses(percepts)
@@ -471,7 +481,7 @@ class EvidenceGraphLM(GraphLM):
 
         first_movement_detected = self._agent_moved_since_reset()
         buffer_data = self._add_displacements(percepts)
-        self.buffer.append(buffer_data)
+        self._append_to_buffer(buffer_data)
         self.buffer.append_input_percepts(percepts)
 
         if first_movement_detected:
@@ -595,13 +605,14 @@ class EvidenceGraphLM(GraphLM):
     ) -> None:
         """Step without trying to recognize object (updating possible matches)."""
         self._update_frame(percepts)
+        self._update_input_frame_location(percepts)
 
         if is_location_only_step(percepts):
             self._displace_hypotheses(percepts)
             return
 
         buffer_data = self._add_displacements(percepts)
-        self.buffer.append(buffer_data)
+        self._append_to_buffer(buffer_data)
         self.buffer.append_input_percepts(percepts)
 
     def receive_votes(self, vote_data):
@@ -686,8 +697,13 @@ class EvidenceGraphLM(GraphLM):
             # doesn't have anything new to communicate).
             vote = None
         else:
-            # Get pose of first sensor stored in buffer.
-            sensed_pose = self.buffer.get_current_pose(input_channel="first")
+            # Pose of the first sensor, in world. Once the buffer holds input-frame
+            # values (step 6), take it from the world copy instead.
+            sensed_pose = (
+                self.buffer.get_current_pose(input_channel="first")
+                if self._world_sensed_pose is None
+                else self._world_sensed_pose
+            )
 
             possible_states = {}
             evidences_by_graph = {
@@ -706,7 +722,7 @@ class EvidenceGraphLM(GraphLM):
                             location=graph_hyps.locations[hyp_id],  # location rel. body
                             morphological_features={
                                 "pose_vectors": OrientationMatrix(
-                                    graph_hyps.poses[hyp_id].T
+                                    graph_hyps.poses[hyp_id]
                                 ),
                                 "pose_fully_defined": True,
                             },
@@ -722,6 +738,8 @@ class EvidenceGraphLM(GraphLM):
             vote = {
                 "possible_states": possible_states,
                 "sensed_pose_rel_body": sensed_pose,
+                # Input frame -> world of the SM feeding this LM; None means world.
+                "sensed_frame": self._last_frame,
             }
         return vote
 
@@ -1110,6 +1128,89 @@ class EvidenceGraphLM(GraphLM):
             None if self._last_frame is None else self._last_frame @ frame.T
         )
         self._last_frame = frame
+
+    def _update_input_frame_location(self, percepts: Sequence[Message]) -> None:
+        """Integrate this LM's location x̂ in its input frame.
+
+        The graph is built in the input frame the SM declares. x̂ starts at the
+        first location expressed in the first frame, x̂ = F_0^T @ y_0, and each step
+        adds the SM's world step expressed in the current frame, x̂ += F_t^T @ l^W.
+        Runs after `_update_frame` (so `_last_frame` is F_t) on every step,
+        location-only steps included.
+
+        With F = I this sums the world steps back to the world location, so the
+        graph is stored in world. With a surface frame it unrolls the surface. An
+        SM without a frame reports in world; then the buffer already holds input-
+        frame values and x̂ isn't tracked.
+
+        Args:
+            percepts: This step's input messages.
+        """
+        sm_percepts = [p for p in percepts if p.is_from_sm()]
+        if (
+            not sm_percepts
+            or sm_percepts[0].sensor_to_world is None
+            or self._last_frame is None
+        ):
+            return
+        if self._input_frame_location is None:
+            self._input_frame_location = self._last_frame.T @ location_mean(sm_percepts)
+            return
+        displacement = self._sm_displacement(sm_percepts)
+        if displacement is not None:
+            self._input_frame_location = (
+                self._input_frame_location + self._last_frame.T @ displacement
+            )
+
+    def _append_to_buffer(self, percepts: Sequence[Message]) -> None:
+        """Append percepts to the buffer in this LM's input frame.
+
+        Frame-carrying SM percepts are stored as copies with `location = x̂` and
+        pose rows `@ F_t` (world -> input frame), so graphs are built in the input
+        frame. Without a frame the percepts are already in it (world) and are
+        stored as they are. The shared messages are not mutated: evidence updates
+        and telemetry use the world values. `buffer.last_location` is reset to the
+        world location, which the goal-attempt check and displacements expect, and
+        the world pose of the first SM channel is kept for votes.
+
+        Args:
+            percepts: Percepts (with displacements) to store.
+        """
+        if self._input_frame_location is None:
+            self.buffer.append(percepts)
+            return
+        self.buffer.append([self._to_input_frame(p) for p in percepts])
+        sm_percepts = [p for p in percepts if p.is_from_sm()]
+        world_location = location_mean(sm_percepts)
+        self.buffer.last_location = world_location.copy()
+        channel = self.buffer.get_first_sensory_input_channel()
+        first = next((p for p in sm_percepts if p.sender_id == channel), None)
+        pose = (
+            None if first is None else first.morphological_features.get("pose_vectors")
+        )
+        if pose is not None:
+            self._world_sensed_pose = np.vstack([world_location, pose.value])
+
+    def _to_input_frame(self, percept: Message) -> Message:
+        """Copy of a frame-carrying SM percept with location and pose in its frame.
+
+        Args:
+            percept: Percept to convert. Returned unchanged if it carries no frame.
+
+        Returns:
+            A shallow copy with `location = x̂` and pose rows `@ F_t`.
+        """
+        if not percept.is_from_sm() or percept.sensor_to_world is None:
+            return percept
+        converted = copy.copy(percept)
+        converted.location = self._input_frame_location.copy()
+        converted.morphological_features = dict(percept.morphological_features)
+        pose = converted.morphological_features.get("pose_vectors")
+        if isinstance(pose, (SurfacePoseVectors, OrientationMatrix)):
+            converted.morphological_features["pose_vectors"] = type(pose)(
+                pose.value @ percept.sensor_to_world
+            )
+        return converted
 
     @staticmethod
     def _sm_displacement(

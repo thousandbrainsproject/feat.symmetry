@@ -19,11 +19,24 @@ from tbp.monty.frameworks.models.graph_matching import (
     MontyForGraphMatching,
 )
 from tbp.monty.frameworks.utils.spatial_arithmetics import (
-    align_orthonormal_vectors,
+    developed_displacement,
+    minimal_rotation,
 )
 from tbp.monty.geometry import OrientationMatrix
 
 logger = logging.getLogger(__name__)
+
+
+def _frame_normal(frame: np.ndarray | None) -> np.ndarray:
+    """Get the z axis of a vote's input frame.
+
+    Args:
+        frame: (3, 3) input frame -> world rotation, or None for world input.
+
+    Returns:
+        The frame's z axis (the surface normal for a 2D SM), or world z.
+    """
+    return np.array([0.0, 0.0, 1.0]) if frame is None else frame[:, 2]
 
 
 class MontyForEvidenceGraphMatching(MontyForGraphMatching):
@@ -56,15 +69,23 @@ class MontyForEvidenceGraphMatching(MontyForGraphMatching):
                         sensor_disp = np.array(receiving_lm_pose[0]) - np.array(
                             sending_lm_pose[0]
                         )
-                        sensor_rotation_disp, _ = align_orthonormal_vectors(
-                            sending_lm_pose[1:],
-                            receiving_lm_pose[1:],
-                            as_scipy=False,
+                        # A vote is a virtual movement from the sending sensor to
+                        # the receiving one: transport between the input frames'
+                        # normals, and the chord unbent into the sender's tangent
+                        # plane. With world-frame (3D) input both are identity.
+                        sending_normal = _frame_normal(
+                            votes_per_lm[j].get("sensed_frame")
+                        )
+                        receiving_normal = _frame_normal(
+                            votes_per_lm[i].get("sensed_frame")
+                        )
+                        transport = minimal_rotation(sending_normal, receiving_normal)
+                        sensor_disp = developed_displacement(
+                            sensor_disp, sending_normal, receiving_normal
                         )
                         logger.debug(
                             f"LM {j} to {i} - displacement: {sensor_disp}, "
-                            f"rotation: "
-                            f"{sensor_rotation_disp}"
+                            f"transport: {transport}"
                         )
                         for obj in votes_per_lm[j]["possible_states"]:
                             # Get the displacement between the sending and receiving
@@ -85,20 +106,20 @@ class MontyForEvidenceGraphMatching(MontyForGraphMatching):
                                 # transformed in different ways depending on the
                                 # receiving LMs' poses
                                 new_s = copy.deepcopy(s)
-                                new_s_pose_vectors = new_s.get_pose_vectors()
-                                # TODO: Replace with match statement
-                                if isinstance(new_s_pose_vectors, OrientationMatrix):
-                                    rotated_displacement = (
-                                        new_s.get_pose_vectors().value.dot(sensor_disp)
-                                    )
-                                else:
+                                pose = new_s.get_pose_vectors()
+                                if not isinstance(pose, OrientationMatrix):
                                     raise TypeError(
                                         "Only OrientationMatrices can rotate sensor "
                                         "displacements."
                                     )
-                                new_s.transform_morphological_features(
-                                    translation=rotated_displacement,
-                                    rotation=sensor_rotation_disp,
+                                # Same update as displace_hypotheses with
+                                # frame_delta = transport^T: the location moves by
+                                # P @ d, and the pose becomes P @ transport^T.
+                                new_s.location = (
+                                    new_s.location + pose.value @ sensor_disp
+                                )
+                                new_s.morphological_features["pose_vectors"] = (
+                                    OrientationMatrix(pose.value @ transport.T)
                                 )
                                 transformed_lm_states_for_object.append(new_s)
                             if obj in lm_state_votes:

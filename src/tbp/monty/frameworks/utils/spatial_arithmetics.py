@@ -140,6 +140,63 @@ def project_onto_tangent_plane(v: ArrayLike, n: ArrayLike) -> np.ndarray:
     return v - np.dot(v, n) * n
 
 
+def minimal_rotation(a: ArrayLike, b: ArrayLike) -> npt.NDArray[np.float64]:
+    """Smallest rotation taking unit vector `a` to unit vector `b`.
+
+    This is the rotation `TangentFrame.transport` applies to its basis.
+
+    Args:
+        a: Unit vector to rotate from.
+        b: Unit vector to rotate to.
+
+    Returns:
+        (3, 3) rotation matrix R with R @ a == b. Identity if `a` and `b` are
+        parallel (antiparallel vectors have no unique smallest rotation).
+    """
+    axis = np.cross(a, b)
+    sin_angle = np.linalg.norm(axis)
+    if sin_angle < DEFAULT_TOLERANCE:
+        return np.eye(3)
+    angle = np.arctan2(sin_angle, np.dot(a, b))
+    return Rotation.from_rotvec(axis / sin_angle * angle).as_matrix()
+
+
+def developed_displacement(
+    chord: ArrayLike, normal_from: ArrayLike, normal_to: ArrayLike
+) -> npt.NDArray[np.float64]:
+    """Unbend a world chord between two surface points into the first tangent plane.
+
+    The surface is assumed to bend about one axis between the points (exact on a
+    cylinder): the bending axis k and angle theta are those of the smallest rotation
+    from `normal_from` to `normal_to`. The chord component along k is kept, the
+    component across k is scaled from chord to arc length, and the result is
+    rotated back by theta / 2 from the chord direction (the tangent at the arc's
+    midpoint) to the tangent at the first point.
+
+    With equal normals (e.g. world-frame 3D input, where both "normals" are world
+    z) this returns the chord unchanged.
+
+    Args:
+        chord: World vector from the first point to the second.
+        normal_from: Unit normal at the first point.
+        normal_to: Unit normal at the second point.
+
+    Returns:
+        The developed (unrolled) displacement, in world, in the first point's
+        tangent plane.
+    """
+    chord = np.asarray(chord, dtype=float)
+    axis = np.cross(normal_from, normal_to)
+    sin_angle = np.linalg.norm(axis)
+    if sin_angle < DEFAULT_TOLERANCE:
+        return chord.copy()
+    k = axis / sin_angle
+    angle = np.arctan2(sin_angle, np.dot(normal_from, normal_to))
+    along = np.dot(chord, k) * k
+    unbent = along + (angle / 2) / np.sin(angle / 2) * (chord - along)
+    return Rotation.from_rotvec(-k * angle / 2).apply(unbent)
+
+
 def is_parallel(
     v1: ArrayLike, v2: ArrayLike, tolerance: float = DEFAULT_TOLERANCE
 ) -> bool:
