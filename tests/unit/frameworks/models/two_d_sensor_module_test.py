@@ -19,7 +19,10 @@ import quaternion as qt
 from tbp.monty.cmp import Message
 from tbp.monty.context import RuntimeContext
 from tbp.monty.frameworks.models.motor_system_state import AgentState, SensorState
-from tbp.monty.frameworks.models.two_d_sensor_module import TwoDSensorModule
+from tbp.monty.frameworks.models.two_d_sensor_module import (
+    TwoDSensorModule,
+    _angle_to_pose_2d,
+)
 from tbp.monty.frameworks.sensors import SensorID
 from tbp.monty.frameworks.utils.edge_detection import (
     DEFAULT_SURFACE_POSE_VECTORS_2D,
@@ -149,7 +152,6 @@ def make_2d_sm(
     edge_detector: Callable[..., EdgeFeatures] | None = None,
     noise_params: dict[str, Any] | None = None,
     delta_thresholds: dict[str, Any] | None = None,
-    output_frame: Literal["tangent", "world"] = "tangent",
 ) -> TwoDSensorModule:
     if features is None:
         features = DEFAULT_FEATURES.copy()
@@ -163,12 +165,13 @@ def make_2d_sm(
         edge_detector=edge_detector,
         noise_params=noise_params,
         delta_thresholds=delta_thresholds,
-        output_frame=output_frame,
     )
 
 
 class TwoDSensorModuleInitTest(unittest.TestCase):
-    def test_first_observation_initializes_2d_location_from_world_xy(self) -> None:
+    def test_first_observation_sends_world_location_and_inits_2d_location(
+        self,
+    ) -> None:
         two_d_sm = make_2d_sm(edge_detector=Mock(return_value=make_no_edge()))
         world_location = np.array([1.0, 2.0, 3.0])
         percept = make_message(
@@ -182,7 +185,7 @@ class TwoDSensorModuleInitTest(unittest.TestCase):
             motor_only_step=False,
         )
 
-        np.testing.assert_allclose(msg.location, [1.0, 2.0, 0.0])
+        np.testing.assert_allclose(msg.location, world_location)
         np.testing.assert_allclose(two_d_sm._previous_2d_location, [1.0, 2.0])
         np.testing.assert_allclose(two_d_sm._previous_3d_location, world_location)
 
@@ -499,9 +502,7 @@ class TwoDSensorModuleTangentFrameTest(unittest.TestCase):
         )
 
     def test_message_carries_tangent_to_world_rotation(self):
-        two_d_sm = make_2d_sm(
-            edge_detector=Mock(return_value=make_no_edge()), output_frame="world"
-        )
+        two_d_sm = make_2d_sm(edge_detector=Mock(return_value=make_no_edge()))
         normal = np.array([np.sqrt(0.5), 0.0, np.sqrt(0.5)])
         tangent = np.array([0.0, 1.0, 0.0])
         two_d_sm._observation_processor.process = Mock(
@@ -525,69 +526,61 @@ class TwoDSensorModuleTangentFrameTest(unittest.TestCase):
         np.testing.assert_allclose(message.sensor_to_world @ [0, 1, 0], frame.basis_v)
         np.testing.assert_allclose(message.sensor_to_world @ [0, 0, 1], normal)
 
-    def _run_tangent_and_world(
-        self, locations: list[np.ndarray]
-    ) -> tuple[list[Message], list[Message]]:
-        """Step a tangent-mode and a world-mode SM through the same percepts.
+    def _run_on_tilted_plane(self, locations: list[np.ndarray]) -> list[Message]:
+        """Step a 2D SM through percepts on the tilted plane.
+
+        Args:
+            locations: World locations on the tilted plane, one per step.
 
         Returns:
-            The tangent-mode messages and the world-mode messages, one per step.
+            The SM's messages, one per step.
         """
         up = np.array([0.0, 1.0, 0.0])
         pose = SurfacePoseVectors(
             np.array([TILTED_NORMAL, up, np.cross(TILTED_NORMAL, up)])
         )
-        outputs = []
-        for output_frame in ("tangent", "world"):
-            two_d_sm = make_2d_sm(
-                edge_detector=Mock(return_value=make_no_edge()),
-                output_frame=output_frame,
-            )
-            two_d_sm._observation_processor.process = Mock(
-                side_effect=[
-                    make_message(location=location.copy(), pose_vectors=pose)
-                    for location in locations
-                ]
-            )
-            ctx = RuntimeContext(rng=np.random.RandomState())
-            outputs.append(
-                [
-                    two_d_sm.step(ctx, sentinel.raw_observation, motor_only_step=False)
-                    for _ in locations
-                ]
-            )
-        return outputs[0], outputs[1]
+        two_d_sm = make_2d_sm(edge_detector=Mock(return_value=make_no_edge()))
+        two_d_sm._observation_processor.process = Mock(
+            side_effect=[
+                make_message(location=location.copy(), pose_vectors=pose)
+                for location in locations
+            ]
+        )
+        ctx = RuntimeContext(rng=np.random.RandomState())
+        return [
+            two_d_sm.step(ctx, sentinel.raw_observation, motor_only_step=False)
+            for _ in locations
+        ]
 
     def _tilted_plane_path(self) -> list[np.ndarray]:
         start = np.array([0.1, 0.2, -0.1])  # on the plane: normal . start == 0
         second = start + 0.01 * TILTED_IN_PLANE + 0.02 * np.array([0.0, 1.0, 0.0])
         return [start, second, second + 0.03 * TILTED_IN_PLANE]
 
-    def test_world_mode_sends_world_location(self):
+    def test_sends_world_location(self):
         locations = self._tilted_plane_path()
 
-        _, world = self._run_tangent_and_world(locations)
+        messages = self._run_on_tilted_plane(locations)
 
-        for message, location in zip(world, locations):
+        for message, location in zip(messages, locations):
             np.testing.assert_allclose(message.location, location)
 
-    def test_world_mode_displacement_is_tangent_displacement_in_world(self):
+    def test_displacement_is_in_plane_world_step(self):
         locations = self._tilted_plane_path()
 
-        tangent, world = self._run_tangent_and_world(locations)
+        messages = self._run_on_tilted_plane(locations)
 
         for t in (1, 2):
-            world_step = world[t].displacement["displacement"]
-            tangent_step = tangent[t].displacement["displacement"]
-            np.testing.assert_allclose(
-                world_step, world[t].sensor_to_world @ tangent_step, atol=1e-12
-            )
+            world_step = messages[t].displacement["displacement"]
+            # In the tangent frame, the step has no component along the normal.
+            tangent_step = messages[t].sensor_to_world.T @ world_step
+            np.testing.assert_allclose(tangent_step[2], 0.0, atol=1e-12)
             # On a flat surface the arc-corrected step is the 3D step itself.
             np.testing.assert_allclose(
                 world_step, locations[t] - locations[t - 1], atol=1e-12
             )
 
-    def test_world_mode_edge_pose_rows_are_tangent_rows_in_world(self):
+    def test_edge_pose_rows_are_tangent_rows_in_world(self):
         observation = make_raw_observation(center_location=np.zeros(3), semantic_id=1)
         edge = EdgeFeatures(
             angle=np.pi / 3,
@@ -596,35 +589,19 @@ class TwoDSensorModuleTangentFrameTest(unittest.TestCase):
             is_geometric_edge=False,
             has_edge=True,
         )
-        poses = []
-        for output_frame in ("tangent", "world"):
-            two_d_sm = make_2d_sm(
-                edge_detector=Mock(return_value=edge), output_frame=output_frame
-            )
-            two_d_sm._update_tangent_frame(surface_normal_3d=TILTED_NORMAL)
-            message = two_d_sm._extract_2d_edge(
-                make_message(), observation, surface_normal_3d=TILTED_NORMAL
-            )
-            poses.append(message.morphological_features["pose_vectors"].value)
-        tangent_rows, world_rows = poses
+        two_d_sm = make_2d_sm(edge_detector=Mock(return_value=edge))
+        two_d_sm._update_tangent_frame(surface_normal_3d=TILTED_NORMAL)
+        message = two_d_sm._extract_2d_edge(
+            make_message(), observation, surface_normal_3d=TILTED_NORMAL
+        )
+        world_rows = message.morphological_features["pose_vectors"].value
+        tangent_rows = _angle_to_pose_2d(
+            edge.angle,
+            observation["cam_to_world"],
+            surface_normal=TILTED_NORMAL,
+            tangent_frame=two_d_sm._tangent_frame,
+        ).value
 
         frame = two_d_sm._frame_matrix()
         np.testing.assert_allclose(world_rows @ frame, tangent_rows, atol=1e-12)
         np.testing.assert_allclose(world_rows[0], TILTED_NORMAL, atol=1e-12)
-
-    def test_rejects_unknown_output_frame(self):
-        with self.assertRaises(ValueError):
-            make_2d_sm(output_frame="bogus")
-
-    def test_tangent_mode_sends_no_frame(self):
-        two_d_sm = make_2d_sm(edge_detector=Mock(return_value=make_no_edge()))
-        two_d_sm._observation_processor.process = Mock(return_value=make_message())
-
-        message = two_d_sm.step(
-            ctx=RuntimeContext(rng=np.random.RandomState()),
-            observation=sentinel.raw_observation,
-            motor_only_step=False,
-        )
-
-        self.assertIsNotNone(two_d_sm._tangent_frame)
-        self.assertIsNone(message.sensor_to_world)
