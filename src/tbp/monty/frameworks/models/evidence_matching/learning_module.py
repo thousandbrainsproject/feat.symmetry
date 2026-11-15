@@ -422,30 +422,24 @@ class EvidenceGraphLM(GraphLM):
             proposer.reset()
         self._telemetry.reset()
 
-    def propose_region(self) -> AttentionRegion | None:
+    def propose_region(self) -> AttentionRegion:
         """Collect the regions this LM's region proposers emit.
+
+        Without configured region proposers, falls back to
+        ``GraphLM.propose_region``: a uniform region over this LM's goals.
 
         Returns:
             The concatenated proposals of every configured region proposer,
             evaluated against the LM's current recognition state (its goals
-            included, through the region context); None when none of them
-            proposed anything.
+            included, through the region context); an empty region when none
+            of them proposed anything.
         """
-        context = EvidenceLMRegionContext(self)
-        regions = []
-        for proposer in self._region_proposers:
-            region = proposer(context)
-            if region is not None:
-                regions.append(region)
-        if len(regions) == 0:
-            proposed = None
-        elif len(regions) == 1:
-            proposed = regions[0]
+        if not self._region_proposers:
+            proposed = super().propose_region()
         else:
-            proposed = AttentionRegion.concat(
-                regions,
-                sender_id=self.learning_module_id,
-            )
+            context = EvidenceLMRegionContext(self)
+            regions = [proposer(context) for proposer in self._region_proposers]
+            proposed = AttentionRegion.concat(r for r in regions if r is not None)
         self._telemetry.attention_region(proposed)
         return proposed
 

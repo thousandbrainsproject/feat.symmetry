@@ -341,6 +341,10 @@ class RuntimeLearningModule(Protocol):
         """
         ...
 
+    def propose_region(self) -> AttentionRegion:
+        """Return the attention region to attend to."""
+        ...
+
     def receive_goal_attempt(self, goal: Goal) -> None:
         """Receive an efferent copy of a goal of this LM the motor system attempted.
 
@@ -432,8 +436,9 @@ class LearningModule(
             goal: The goal the motor system attempted.
         """
 
-    def propose_region(self) -> AttentionRegion | None:
-        return AttentionRegion.empty()
+    @abc.abstractmethod
+    def propose_region(self) -> AttentionRegion:
+        pass
 
     @abc.abstractmethod
     def get_output(self) -> Message | None:
