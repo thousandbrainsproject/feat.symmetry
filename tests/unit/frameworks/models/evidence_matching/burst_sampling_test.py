@@ -28,7 +28,7 @@ from tbp.monty.frameworks.models.evidence_matching.hypotheses import (
 from tbp.monty.frameworks.models.evidence_matching.learning_module import (
     InvalidEvidenceThresholdConfig,
 )
-from tbp.monty.geometry import Rotation, SurfacePoseVectors
+from tbp.monty.geometry import OrientationMatrix, Rotation, SurfacePoseVectors
 
 
 class BurstSamplingHypothesesUpdaterTest(TestCase):
@@ -251,7 +251,10 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
         """
         self.updater.sampling_burst_steps = 3
         self.updater.sampling_multiplier = sampling_multiplier
-        channel_features = {"pose_fully_defined": pose_fully_defined}
+        channel_features = {
+            "pose_fully_defined": pose_fully_defined,
+            "pose_vectors": SurfacePoseVectors(np.eye(3, dtype=np.float64)),
+        }
         num_hyps_per_node = self.updater._num_hyps_per_node(features=channel_features)
 
         self.mock_graph_memory.get_input_channels_in_graph = Mock(
@@ -545,6 +548,28 @@ class BurstSamplingHypothesesUpdaterTest(TestCase):
             updater._num_hyps_per_node({"pose_fully_defined": pose_fully_defined}),
             num_euler_angles,
         )
+
+    @given(pose_fully_defined=st.booleans())
+    def test_num_hyps_per_node_is_one_for_orientation_matrix(
+        self, pose_fully_defined: bool
+    ) -> None:
+        features = {
+            "pose_fully_defined": pose_fully_defined,
+            "pose_vectors": OrientationMatrix(np.eye(3, dtype=np.float64)),
+        }
+
+        self.assertEqual(self.updater._num_hyps_per_node(features), 1)
+
+    def test_num_hyps_per_node_raises_for_unsupported_pose_vectors_type(
+        self,
+    ) -> None:
+        features = {
+            "pose_fully_defined": True,
+            "pose_vectors": np.eye(3, dtype=np.float64),
+        }
+
+        with self.assertRaises(TypeError):
+            self.updater._num_hyps_per_node(features)
 
     @given(pose_fully_defined=st.booleans())
     def test_sample_new_hypotheses_returns_empty_when_count_zero(

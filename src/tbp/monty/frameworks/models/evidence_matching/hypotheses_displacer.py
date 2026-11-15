@@ -28,12 +28,14 @@ from tbp.monty.frameworks.models.evidence_matching.graph_memory import (
 from tbp.monty.frameworks.models.evidence_matching.hypotheses import Hypotheses
 from tbp.monty.frameworks.utils.graph_matching_utils import (
     get_custom_distances,
+    get_euclidean_distances,
     get_relevant_curvature,
 )
 from tbp.monty.frameworks.utils.spatial_arithmetics import (
     batch_rotate_pose_vectors,
     get_angles_for_all_hypotheses,
 )
+from tbp.monty.geometry import OrientationMatrix, SurfacePoseVectors
 
 logger = logging.getLogger(__name__)
 
@@ -249,11 +251,13 @@ class DefaultHypothesesDisplacer:
 
         Returns:
             The location evidence.
+
+        Raises:
+            TypeError: If unsupported pose_vectors type.
         """
         logger.debug(
             f"Calculating evidence for {graph_id} using input from {input_channel}"
         )
-
         rotated_pose_vectors = batch_rotate_pose_vectors(
             channel_features["pose_vectors"],
             channel_possible_poses,
@@ -273,18 +277,15 @@ class DefaultHypothesesDisplacer:
             nearest_node_ids = np.expand_dims(nearest_node_ids, axis=1)
 
         nearest_node_locs = channel_locations[nearest_node_ids]
-        max_abs_curvature = get_relevant_curvature(channel_features)
-        custom_nearest_node_dists = get_custom_distances(
-            nearest_node_locs,
-            search_locations,
-            rotated_pose_vectors[:, 0, :],
-            max_abs_curvature,
+        nearest_node_dists = self._nearest_node_distances(
+            predicted_locations=search_locations,
+            nearest_node_locations=nearest_node_locs,
+            rotated_pose_vectors=rotated_pose_vectors,
+            channel_features=channel_features,
         )
         # shape=(H, K)
-        node_distance_weights = self._get_node_distance_weights(
-            custom_nearest_node_dists
-        )
-        # Get IDs where custom_nearest_node_dists > max_match_distance
+        node_distance_weights = self._get_node_distance_weights(nearest_node_dists)
+        # Get IDs where nearest_node_dists > max_match_distance
         mask = node_distance_weights <= 0
 
         new_pos_features = self.graph_memory.get_features_at_node(
@@ -295,13 +296,24 @@ class DefaultHypothesesDisplacer:
         )
         # Calculate the pose error for each hypothesis
         # shape=(H, K)
-        radius_evidence = self._get_pose_evidence_matrix(
-            rotated_pose_vectors,
-            channel_features["pose_fully_defined"],
-            new_pos_features,
-            input_channel,
-            node_distance_weights,
-        )
+        if isinstance(channel_features["pose_vectors"], SurfacePoseVectors):
+            radius_evidence = self._sensory_pose_evidence(
+                rotated_pose_vectors,
+                channel_features["pose_fully_defined"],
+                new_pos_features,
+                input_channel,
+                node_distance_weights,
+            )
+        elif isinstance(channel_features["pose_vectors"], OrientationMatrix):
+            radius_evidence = self._object_pose_evidence(
+                rotated_pose_vectors,
+                new_pos_features,
+            )
+        else:
+            raise TypeError(
+                "Cannot compute evidence for type "
+                f"{type(channel_features['pose_vectors'])}"
+            )
         # Set the evidences which are too far away to -1
         radius_evidence[mask] = -1
         # If a node is too far away, weight the negative evidence fully (*1). This
@@ -338,10 +350,58 @@ class DefaultHypothesesDisplacer:
             axis=1,
         )
 
+    @staticmethod
+    def _nearest_node_distances(
+        predicted_locations: npt.NDArray[np.float64],
+        nearest_node_locations: npt.NDArray[np.float64],
+        rotated_pose_vectors: npt.NDArray[np.float64],
+        channel_features: dict[str, Any],
+    ) -> npt.NDArray[np.float64]:
+        """Calculate the distance from each hypothesis to each of its nearest nodes.
+
+        Object orientations have no surface normal to flatten the search sphere along,
+        so they use plain Euclidean distance. Surface poses penalize nodes off the
+        tangent plane, scaled by the sensed curvature.
+
+        Args:
+            predicted_locations: Hypothesized locations, shape (H, 3).
+            nearest_node_locations: Locations of each hypothesis' nearest nodes,
+                shape (H, K, 3).
+            rotated_pose_vectors: Sensed pose vectors rotated by each hypothesis pose,
+                shape (H, 3, 3). Only read for surface poses, where row 0 is the
+                surface normal.
+            channel_features: Sensed features of the input channel. Its
+                "pose_vectors" type selects the distance; curvature is only read for
+                surface poses.
+
+        Returns:
+            Distances, shape (H, K).
+
+        Raises:
+            TypeError: If unsupported pose_vectors type.
+        """
+        # TODO: Replace with match statements
+        if isinstance(channel_features["pose_vectors"], OrientationMatrix):
+            return get_euclidean_distances(
+                predicted_locations=predicted_locations,
+                nearest_node_locations=nearest_node_locations,
+            )
+        if isinstance(channel_features["pose_vectors"], SurfacePoseVectors):
+            return get_custom_distances(
+                predicted_locations=predicted_locations,
+                nearest_node_locations=nearest_node_locations,
+                surface_normals=rotated_pose_vectors[:, 0, :],
+                curvature=get_relevant_curvature(channel_features),
+            )
+        raise TypeError(
+            "Cannot compute distances for type "
+            f"{type(channel_features['pose_vectors'])}"
+        )
+
     def _get_node_distance_weights(self, distances):
         return (self.max_match_distance - distances) / self.max_match_distance
 
-    def _get_pose_evidence_matrix(
+    def _sensory_pose_evidence(
         self,
         query_pose_vectors: npt.NDArray[np.float64],
         query_pose_fully_defined: bool,
@@ -422,3 +482,35 @@ class DefaultHypothesesDisplacer:
             surface_normal_evidence * surface_normal_weight + cd1_evidence * cd1_weight
         )
         return pose_evidence_weighted
+
+    def _object_pose_evidence(
+        self,
+        query_pose_vectors: npt.NDArray[np.float64],
+        node_features: dict[str, Any],
+    ) -> npt.NDArray[np.float64]:
+        """Calculate evidence from sensed and stored object orientations.
+
+        Object orientations are full, signed rotations. We compare them by the angle of
+        the relative rotation between the hypothesis-rotated sensed pose
+        (query_pose_vectors) and the pose stored at each node
+        (node_features["pose_vectors"]). Evidence falls linearly from 1 at 0 degrees to
+        -1 at 180 degrees.
+
+        Args:
+            query_pose_vectors: Observed object orientations rotated by each hypothesis,
+                shape (H, 3, 3).
+            node_features: Features at nodes that are being tested.
+                node_features["pose_vectors"] have shpae (H, K, 9), where
+                K = num_neighbors.
+
+        Returns:
+            Pose evidence per hypothesis and node, shape (H, K). In range [-1, 1].
+        """
+        num_hyps, num_neighbors = node_features["pose_vectors"].shape[:2]
+        trace = np.einsum(
+            "hij,hkij->hk",
+            query_pose_vectors,
+            node_features["pose_vectors"].reshape(num_hyps, num_neighbors, 3, 3),
+        )
+        angle_error = np.arccos(np.clip((trace - 1) / 2, -1.0, 1.0))
+        return 1 - 2 * angle_error.reshape(num_hyps, num_neighbors) / np.pi

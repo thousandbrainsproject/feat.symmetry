@@ -522,6 +522,16 @@ class MontyExperiment:
         while not self._recognition_complete(count):
             actions = self.run_step(ctx, count.step, actions)
             count.step += 1
+            if count.step % 50 == 0:
+                import resource
+
+                logger.info(
+                    "step=%d exploring=%d matching=%d maxrss=%.0f MB",
+                    count.step,
+                    count.exploring_steps,
+                    count.matching_steps,
+                    resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6,
+                )
             if self._check_if_any_lms_updated():
                 if self.model.is_exploring:
                     count.exploring_steps += 1

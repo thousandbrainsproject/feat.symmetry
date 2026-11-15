@@ -407,6 +407,36 @@ def location_mean(messages: Sequence[Message]) -> npt.NDArray[np.float64] | None
     return np.mean(locations, axis=0)
 
 
+def goals_to_columns(goals: Sequence[Goal]) -> dict[str, np.ndarray]:
+    """One step's goals as columns, for telemetry.
+    Thousands of goals a step are far cheaper to keep, write and read as a
+    few arrays than as ``Goal`` objects.
+
+    Args:
+        goals: The goals.
+
+    Returns:
+        ``locations`` (N, 3) float, NaN for a goal without one;
+        ``confidences`` (N,) float; ``sender_ids`` (N,) str.
+    """
+    locations = np.array(
+        [
+            np.full(3, np.nan) if goal.location is None else goal.location
+            for goal in goals
+        ],
+    ).reshape(-1, 3)
+    return {
+        "locations": locations,
+        "confidences": np.array([goal.confidence for goal in goals]),
+        "sender_ids": np.array([goal.sender_id for goal in goals]),
+    }
+
+
+# Bounds of an attention weight: full excitation and full inhibition. A
+# freshly attended location is proposed at MAX_ATTENTION_WEIGHT.
+MIN_ATTENTION_WEIGHT = -1.0
+MAX_ATTENTION_WEIGHT = 1.0
+
 @dataclass(frozen=True)
 class AttentionRegion:
     """A sequence of locations, each carrying an attention weight.
