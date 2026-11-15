@@ -1,8 +1,8 @@
 # @package experiment.config.monty_config.sensor_modules
 
 # Two copies of the 2D SM in 3sm_2d3d_dist_raw0 (sensor_module_1), one per
-# patch, plus a plain view finder. For idea 4, set output_frame: world on
-# both 2D SMs (see experiment/2d_orientation/eval_2d_vote_world.yaml).
+# patch, plus a plain view finder. On the idea4 branch, both 2D SMs report in
+# world.
 sensor_module_0:
   _target_: tbp.monty.frameworks.models.two_d_sensor_module.TwoDSensorModule
   sensor_module_id: patch_0
