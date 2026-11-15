@@ -27,8 +27,8 @@ from tbp.monty.frameworks.models.evidence_matching.graph_memory import (
 )
 from tbp.monty.frameworks.models.evidence_matching.hypotheses import Hypotheses
 from tbp.monty.frameworks.utils.graph_matching_utils import (
-    get_custom_distances,
-    get_euclidean_distances,
+    custom_distances,
+    euclidean_distances,
     get_relevant_curvature,
 )
 from tbp.monty.frameworks.utils.spatial_arithmetics import (
@@ -277,15 +277,28 @@ class DefaultHypothesesDisplacer:
             nearest_node_ids = np.expand_dims(nearest_node_ids, axis=1)
 
         nearest_node_locs = channel_locations[nearest_node_ids]
-        nearest_node_dists = self._nearest_node_distances(
-            predicted_locations=search_locations,
-            nearest_node_locations=nearest_node_locs,
-            rotated_pose_vectors=rotated_pose_vectors,
-            channel_features=channel_features,
-        )
+        # TODO: Replace with match statement
+        if isinstance(channel_features["pose_vectors"], OrientationMatrix):
+            nearest_node_dists = euclidean_distances(
+                predicted_locations=search_locations,
+                nearest_node_locations=nearest_node_locs,
+            )
+        elif isinstance(channel_features["pose_vectors"], SurfacePoseVectors):
+            nearest_node_dists = custom_distances(
+                predicted_locations=search_locations,
+                nearest_node_locations=nearest_node_locs,
+                surface_normals=rotated_pose_vectors[:, 0, :],
+                curvature=get_relevant_curvature(channel_features),
+            )
+        else:
+            raise TypeError(
+                "Can't calculate evidence for pose type "
+                f"{type(channel_features['pose_vectors'])}"
+            )
+
         # shape=(H, K)
         node_distance_weights = self._get_node_distance_weights(nearest_node_dists)
-        # Get IDs where nearest_node_dists > max_match_distance
+        # Get IDs where custom_nearest_node_dists > max_match_distance
         mask = node_distance_weights <= 0
 
         new_pos_features = self.graph_memory.get_features_at_node(
@@ -296,6 +309,7 @@ class DefaultHypothesesDisplacer:
         )
         # Calculate the pose error for each hypothesis
         # shape=(H, K)
+        # TODO: Replace with match statement
         if isinstance(channel_features["pose_vectors"], SurfacePoseVectors):
             radius_evidence = self._sensory_pose_evidence(
                 rotated_pose_vectors,
@@ -348,54 +362,6 @@ class DefaultHypothesesDisplacer:
         return np.max(
             radius_evidence,  # * node_distance_weights,
             axis=1,
-        )
-
-    @staticmethod
-    def _nearest_node_distances(
-        predicted_locations: npt.NDArray[np.float64],
-        nearest_node_locations: npt.NDArray[np.float64],
-        rotated_pose_vectors: npt.NDArray[np.float64],
-        channel_features: dict[str, Any],
-    ) -> npt.NDArray[np.float64]:
-        """Calculate the distance from each hypothesis to each of its nearest nodes.
-
-        Object orientations have no surface normal to flatten the search sphere along,
-        so they use plain Euclidean distance. Surface poses penalize nodes off the
-        tangent plane, scaled by the sensed curvature.
-
-        Args:
-            predicted_locations: Hypothesized locations, shape (H, 3).
-            nearest_node_locations: Locations of each hypothesis' nearest nodes,
-                shape (H, K, 3).
-            rotated_pose_vectors: Sensed pose vectors rotated by each hypothesis pose,
-                shape (H, 3, 3). Only read for surface poses, where row 0 is the
-                surface normal.
-            channel_features: Sensed features of the input channel. Its
-                "pose_vectors" type selects the distance; curvature is only read for
-                surface poses.
-
-        Returns:
-            Distances, shape (H, K).
-
-        Raises:
-            TypeError: If unsupported pose_vectors type.
-        """
-        # TODO: Replace with match statements
-        if isinstance(channel_features["pose_vectors"], OrientationMatrix):
-            return get_euclidean_distances(
-                predicted_locations=predicted_locations,
-                nearest_node_locations=nearest_node_locations,
-            )
-        if isinstance(channel_features["pose_vectors"], SurfacePoseVectors):
-            return get_custom_distances(
-                predicted_locations=predicted_locations,
-                nearest_node_locations=nearest_node_locations,
-                surface_normals=rotated_pose_vectors[:, 0, :],
-                curvature=get_relevant_curvature(channel_features),
-            )
-        raise TypeError(
-            "Cannot compute distances for type "
-            f"{type(channel_features['pose_vectors'])}"
         )
 
     def _get_node_distance_weights(self, distances):
@@ -483,18 +449,24 @@ class DefaultHypothesesDisplacer:
         )
         return pose_evidence_weighted
 
+    @staticmethod
     def _object_pose_evidence(
-        self,
         query_pose_vectors: npt.NDArray[np.float64],
         node_features: dict[str, Any],
     ) -> npt.NDArray[np.float64]:
         """Calculate evidence from sensed and stored object orientations.
 
-        Object orientations are full, signed rotations. We compare them by the angle of
-        the relative rotation between the hypothesis-rotated sensed pose
-        (query_pose_vectors) and the pose stored at each node
-        (node_features["pose_vectors"]). Evidence falls linearly from 1 at 0 degrees to
-        -1 at 180 degrees.
+        Object orientations are signed rotation matrices.
+
+        We first calculate the relative rotation matrices between the hypothesis-rotated
+        sensed poses (query_pose_vectors) and the stored poses
+        (node_features["pose_vectors"]). Once we have these rotation matrices, then we
+        use the trace method to calculate the angle of these relative rotations using
+        a theorem where the trace of a rotation matrix is related to the rotation angle
+        by trace = 1 + 2 * cos(theta), with theta being the rotation angle. The trace
+        method uses fewer multiplications than alternatives and skips building
+        ``Rotation`` objects. Lastly, the angle is scaled linearly into the evidence
+        range [-1, 1], where 0 degrees maps to 1 and 180 degrees maps to -1.
 
         Args:
             query_pose_vectors: Observed object orientations rotated by each hypothesis,
