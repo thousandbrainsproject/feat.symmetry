@@ -149,7 +149,6 @@ class Monty(ExperimentMonty, RuntimeMonty, Snapshotable, metaclass=abc.ABCMeta):
         self._vote()
         self._pass_goals()
         self._step_motor_system(ctx, observations, proprioceptive_state)
-        self._set_step_type_and_check_if_done()
 
     def _exploratory_step(
         self,
@@ -170,7 +169,6 @@ class Monty(ExperimentMonty, RuntimeMonty, Snapshotable, metaclass=abc.ABCMeta):
         self._step_learning_modules(ctx)
         self._pass_goals()
         self._step_motor_system(ctx, observations, proprioceptive_state)
-        self._set_step_type_and_check_if_done()
 
     @abc.abstractmethod
     def step(
@@ -236,14 +234,6 @@ class Monty(ExperimentMonty, RuntimeMonty, Snapshotable, metaclass=abc.ABCMeta):
             ctx: The runtime context.
             observations: The observations from the environment.
             proprioceptive_state: The proprioceptive state from the environment.
-        """
-        pass
-
-    @abc.abstractmethod
-    def _set_step_type_and_check_if_done(self):
-        """Check terminal conditions and decide if to change the step type.
-
-        Update what self.is_done returns to the experiment.
         """
         pass
 
@@ -351,20 +341,6 @@ class RuntimeLearningModule(Protocol):
         """Return the attention region to attend to."""
         ...
 
-    def receive_goal_attempt(self, goal: Goal) -> None:
-        """Receive an efferent copy of a goal of this LM the motor system attempted.
-
-        Called when the motor system began executing a goal-driven movement
-        (e.g. a hypothesis-testing jump) toward a goal proposed by this LM's
-        GSG. The signal carries no information about the movement's outcome;
-        the LM can combine it with its subsequent sensory input to judge
-        whether the attempt succeeded.
-
-        Args:
-            goal: The goal the motor system attempted.
-        """
-        ...
-
     def get_output(self) -> Message | None:
         """Return learning module output (same format as input)."""
         ...
@@ -430,19 +406,6 @@ class LearningModule(
     @abc.abstractmethod
     def propose_goals(self) -> list[Goal]:
         pass
-
-    def receive_goal_attempt(self, goal: Goal) -> None:
-        """Receive an efferent copy of a goal of this LM the motor system attempted.
-
-        By default this signal is ignored. LMs that use goal-driven movements
-        (e.g. hypothesis-testing jumps) can override this to combine the
-        efferent copy with subsequent sensory input, e.g. to detect failed
-        jumps and accumulate negative evidence for the hypothesis that
-        proposed the goal.
-
-        Args:
-            goal: The goal the motor system attempted.
-        """
 
     @abc.abstractmethod
     def propose_region(self) -> AttentionRegion:

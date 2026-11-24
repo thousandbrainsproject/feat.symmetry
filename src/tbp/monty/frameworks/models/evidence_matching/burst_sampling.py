@@ -420,18 +420,19 @@ class BurstSamplingHypothesesUpdater:
             The number of hypotheses per node.
 
         Raises:
-            TypeError: If unsupported pose_vectors type.
+            TypeError: If pose vectors is not OrientationMatrix or SurfacePoseVectors.
         """
         if self.initial_possible_poses is not None:
             return len(self.initial_possible_poses)
 
+        # TODO: Replace with match statement
         if isinstance(features["pose_vectors"], OrientationMatrix):
-            # A signed orientation aligns with stored in exactly one way.
             return 1
         if isinstance(features["pose_vectors"], SurfacePoseVectors):
             return 2 if features["pose_fully_defined"] else self.umbilical_num_poses
+
         raise TypeError(
-            f"Cannot sample hypotheses for type {type(features['pose_vectors'])}"
+            f"Unsupported pose_vector type: {type(features['pose_vectors'])}"
         )
 
     def _sample_count(
@@ -628,6 +629,9 @@ class BurstSamplingHypothesesUpdater:
 
         Returns:
             Hypotheses sampled from this channel.
+
+        Raises:
+            TypeError: If pose vectors is not OrientationMatrix or SurfacePoseVectors.
         """
         num_hyps_per_node = self._num_hyps_per_node(features)
         # === Calculate selected evidence by top-k indices === #
@@ -665,12 +669,19 @@ class BurstSamplingHypothesesUpdater:
                 )[top_indices]
             )
             sensed_directions = features["pose_vectors"]
+
+            # TODO: Replace with match statement
             if isinstance(sensed_directions, OrientationMatrix):
-                possible_s_d = [sensed_directions.value]
-            else:
+                possible_s_d: list[npt.NDArray[np.float64]] = [sensed_directions]  # type: ignore[list-item]
+            elif isinstance(sensed_directions, SurfacePoseVectors):
                 possible_s_d = possible_sensed_directions(
                     sensed_directions, num_hyps_per_node
                 )
+            else:
+                raise TypeError(
+                    f"Unsupported pose_vector type: {type(sensed_directions)}"
+                )
+
             selected_rotations = np.vstack(
                 [
                     align_multiple_orthonormal_vectors(

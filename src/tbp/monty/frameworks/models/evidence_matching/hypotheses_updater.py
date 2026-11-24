@@ -329,20 +329,19 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
         return Hypotheses.concatenate([hypotheses, *new_hyps])
 
     def _get_all_informed_possible_poses(
-        self, graph_id: str, sensed_channel_features: dict, input_channel: str
-    ):
+        self, graph_id: str, sensed_channel_features: dict[str, Any], input_channel: str
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         """Initialize hypotheses on possible rotations for each location.
 
         This is similar to _get_informed_possible_poses but doesn't require looping
         over nodes.
 
         For this, we check how the sensed pose vectors would have to be rotated to
-        match the stored ones at each node. For surface poses (surface normal and
-        principal curvature directions), the PCs have no sign, so we test both
-        directions. If PC is similar in both directions, the direction vectors cannot
-        inform this, and we have to uniformly sample multiple possible rotations
-        along this plane. Object poses are signed orientations, so a single
-        rotation per node aligns them.
+        match the stored ones at each node. For ``SurfacePoseVectors``, the PCs have no
+        sign, so we test both directions. If PC is similar in both directions, the
+        direction vectors cannot inform this, and we have to uniformly sample multiple
+        possible rotations along this plane. ``OrientationMatrix`` is a signed
+        orientation, so a single rotation per node aligns them.
 
         Note:
             In general this initialization of hypotheses determines how well the
@@ -353,13 +352,13 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
         Args:
             graph_id: The ID of the graph to initialize hypotheses for.
             sensed_channel_features: Sensed features of the input channel.
-            input_channel: Name of input, e.g. patch_0.
+            input_channel: Input channel to initialize hypotheses for.
 
         Returns:
             The possible locations and rotations.
 
         Raises:
-            TypeError: If unsupported pose_vectors type.
+            TypeError: If unsupported pose_vector type.
         """
         all_possible_locations = np.zeros((1, 3))
         all_possible_rotations = np.zeros((1, 3, 3))
@@ -369,8 +368,9 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
             graph_id, input_channel
         )
         sensed_directions = sensed_channel_features["pose_vectors"]
+        # TODO: Replace with match statement
         if isinstance(sensed_directions, OrientationMatrix):
-            possible_s_d = [sensed_directions.value]
+            possible_s_d: list[npt.NDArray[np.float64]] = [sensed_directions]  # type: ignore[list-item]
         elif isinstance(sensed_directions, SurfacePoseVectors):
             # Check if PCs in patch are similar -> need to sample more directions
             if (
@@ -383,9 +383,8 @@ class DefaultHypothesesUpdater(HypothesesUpdater):
             else:
                 possible_s_d = possible_sensed_directions(sensed_directions, 2)
         else:
-            raise TypeError(
-                f"Cannot initialize hypotheses for type {type(sensed_directions)}"
-            )
+            raise TypeError(f"Unsupported pose_vector type: {type(sensed_directions)}")
+
         for s_d in possible_s_d:
             # Since we have orthonormal vectors and know their correspondence we can
             # directly calculate the rotation instead of using the Kabsch estimate
