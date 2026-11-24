@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Collection, Sequence
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -39,7 +39,7 @@ from tbp.monty.frameworks.models.object_model import GraphObjectModel
 from tbp.monty.frameworks.utils.spatial_arithmetics import (
     apply_rf_transform_to_points,
 )
-from tbp.monty.geometry import Rotation
+from tbp.monty.geometry import OrientationMatrix, Rotation, SurfacePoseVectors
 from tbp.monty.memento import Memento
 from tbp.monty.runtime import is_location_only_step
 from tbp.monty.telemetry.schemas import TelemetryEvent
@@ -97,7 +97,7 @@ class MontyForGraphMatching(MontyBase):
             # made it have possible matches now.
             lm.set_individual_ts(terminal_state=None)
 
-    def check_if_any_lms_updated(self):
+    def check_if_any_lms_updated(self) -> bool:
         """True if any LM received sensory information on the current episode step.
 
         Returns:
@@ -112,64 +112,8 @@ class MontyForGraphMatching(MontyBase):
         # Otherwise return False
         return False
 
-    def deal_with_time_out(self):
-        """Set LM terminal states to time_out."""
-        self._set_time_outs(global_time_out=True)
-
-    def check_terminal_conditions(self) -> bool:
-        """Check if all LMs have reached a terminal state.
-
-        This could be no_match, match, or time_out. If all LMs have reached one of these
-        states, end the episode.
-
-        Currently the episode just ends if
-            - the configured `match_criterion` is satisfied by the LMs that have
-              reached "match"
-            - all lms have reached "no_match"
-            - We have exceeded max_total_steps
-
-        Note:
-            In the future we may want to allow ending an episode when all states are
-            either match or no_match. Right now, the match lms will have to convince the
-            no_match lms of their detected object and pose for the episode to end which
-            may be more difficult if not all LMs know about all objects.
-
-        Returns:
-            True if the match criterion is satisfied, False otherwise.
-        """
-        # First check if all LMs have no match (for example in the first episode when
-        # we have no objects in memory yet). If that is the case there is no need to
-        # take max_steps or to spend time updating the lms terminal conditions. We could
-        # also reset the hypotheses of the no_match LMs to give them another chance to
-        # recover.
-        all_lms_no_match = True
-        for lm in self.learning_modules:
-            if lm.terminal_state != "no_match":
-                all_lms_no_match = False
-
-        if all_lms_no_match:
-            # No need to check any other conditions if all LMs have no_match
-            return True
-
-        # No need to check pose consensus if we haven't moved min steps yet.
-        if not self.exceeded_min_steps:
-            return False
-
-        # Check if LMs satisfy the match criterion
-        # TODO: we may also want to count no_match as done.
-        terminal_states: dict[str, str | None] = {}
-        for lm in self.learning_modules:
-            lm.update_terminal_condition()
-            logger.debug(
-                f"{lm.learning_module_id} has terminal state: {lm.terminal_state}"
-            )
-            terminal_states[lm.learning_module_id] = lm.terminal_state
-
-        if self._match_criterion(terminal_states):
-            logger.info("\n\nMONTY DETECTED MATCH\n\n")
-            return True
-
-        return False
+    def deal_with_time_out(self, global_time_out: bool = True) -> None:
+        self._set_time_outs(global_time_out=global_time_out)
 
     # ------------------ Logging & Saving ----------------------
     def load_state_dict_from_parallel(self, parallel_dirs, save=False):
@@ -403,52 +347,6 @@ class MontyForGraphMatching(MontyBase):
             )
             logger.info(f"Possible matches for {lm.learning_module_id}: {pm}")
 
-    def _set_step_type_and_check_if_done(self):
-        """Check terminal conditions and decide if we change the step type."""
-        self.update_step_counters()
-
-        if self.step_type == "matching_step":
-            # Check that at least one LM has processed information, such that we should
-            # run check_terminal_conditions(); note in particular that
-            # check_terminal_conditions will e.g. increment symmetry evidence, so we
-            # should only run it if there was new information received
-            if self.check_if_any_lms_updated():
-                # Decide if we switch to exploratory step
-                enough_lms_done = self.check_terminal_conditions()
-
-                if enough_lms_done:
-                    # set terminal state of lms that are not done yet to time_out or
-                    # pose_time out. Other terminal states remain the same.
-                    self._set_time_outs(global_time_out=False)
-
-                    if self.experiment_mode is ExperimentMode.TRAIN:
-                        self.switch_to_exploratory_step()
-
-                    elif (
-                        self.experiment_mode is ExperimentMode.EVAL
-                        and self.matching_steps > self.min_eval_steps
-                    ):
-                        self._is_done = True
-
-            else:
-                self.matching_steps -= 1
-
-        elif self.step_type == "exploratory_step":
-            if self.check_if_any_lms_updated():
-                if self.exploratory_steps >= self.num_exploratory_steps:
-                    self._is_done = True
-
-            else:
-                # If information was not passed to the LMs, then don't count as a true
-                # exploratory step
-                self.exploratory_steps -= 1
-
-                # Note that as for matching steps in MontyObjectRecognitionExperiment,
-                # Monty experiment classes handle the case where
-                # exploratory_steps is never being incremented (e.g. because we're in
-                # a void without any objects), ensuring that we eventually time-out
-                # according to max_total_steps
-
     # ------------------------ Helper --------------------------
     def _set_stepwise_targets(self, lm, sensory_inputs):
         """Set the "stepwise" target for each learning module.
@@ -483,7 +381,7 @@ class MontyForGraphMatching(MontyBase):
         # Add logging information : TODO use the buffer to log this appropriately
         lm.stepwise_targets_list.append(lm.stepwise_target_object)
 
-    def _set_time_outs(self, global_time_out=False):
+    def _set_time_outs(self, global_time_out: bool = False) -> None:
         """Set terminal state of LMs that are not done yet to time_out.
 
         Args:
@@ -513,6 +411,7 @@ class GraphLM(LearningModule):
     possible_paths: dict[str, Any]
     detected_rotation_r: Rotation | None
     primary_target: str | None
+    terminal_state: Literal["match", "no_match", "pose_time_out", "time_out"] | None
 
     def __init__(self, initialize_base_modules=True) -> None:
         """Initialize general Learning Module based on graphs.
@@ -1006,19 +905,23 @@ class GraphLM(LearningModule):
         # QUESTION: Should this actually be something handled in LMs?
         raise NotImplementedError("Need to implement way to update memory hypotheses")
 
-    def _update_memory(self):
+    def _update_memory(self) -> None:
         """Give all infos to graph_memory.update_memory to determine how to update."""
         if self.detected_object is None:
             logger.info("no match found in time, not updating memory")
             return
-        args = self.buffer.get_infos_for_graph_update()
-        args["graph_id"] = self.detected_object
-        args["object_rotation"] = self.detected_rotation_r
-        if args["object_rotation"] is not None:
-            # TODO: find a solution that makes it more obvious when rotation is rel
-            # the model or rel environment.
-            args["object_rotation"] = args["object_rotation"].inv()
-        self.graph_memory.update_memory(**args)
+
+        self.graph_memory.update_memory(
+            locations=self.buffer.get_all_locations_on_object(),
+            features=self.buffer.get_all_features_on_object(),
+            graph_id=self.detected_object,
+            object_location_rel_body=self.buffer.stats["detected_location_rel_body"],
+            location_rel_model=self.buffer.stats["detected_location_on_model"],
+            object_rotation=self.detected_rotation_r.inv()
+            if self.detected_rotation_r is not None
+            else None,
+            pose_vector_types=self.buffer.pose_vector_types,
+        )
 
     def _update_target_graph_mapping(self, detected_object, target_object):
         """Update dicts that keep track which graphs were built from which objects."""
@@ -1126,6 +1029,8 @@ class GraphMemory(LMMemory):
     Subclasses are DisplacementGraphMemory, FeatureGraphMemory and EvidenceGraphMemory.
     """
 
+    pose_vector_types: dict[str, type[SurfacePoseVectors | OrientationMatrix]]
+
     def __init__(self, graph_delta_thresholds=None, k=None) -> None:
         """Initialize a graph memory structure. This can then be filled with graphs.
 
@@ -1147,6 +1052,7 @@ class GraphMemory(LMMemory):
         # Array representation of features for each graph -> faster matching
         self.feature_array = {}
         self.feature_order = {}  # Order in which features are stored in feature_array
+        self.pose_vector_types = {}
 
     # =============== Public Interface Functions ===============
     # ------------------- Main Algorithm -----------------------
@@ -1159,6 +1065,7 @@ class GraphMemory(LMMemory):
         object_location_rel_body: npt.NDArray,
         location_rel_model: npt.NDArray,
         object_rotation: Rotation | None,
+        pose_vector_types: dict[str, type[SurfacePoseVectors | OrientationMatrix]],
     ) -> None:
         """Determine how to update memory and call corresponding function.
 
@@ -1182,6 +1089,8 @@ class GraphMemory(LMMemory):
             logger.info(f"{graph_id} already in memory ({self.get_memory_ids()})")
         else:
             logger.info(f"{graph_id} not in memory ({self.get_memory_ids()})")
+
+        self.pose_vector_types.update(pose_vector_types)
 
         for input_channel, channel_features in features.items():
             (

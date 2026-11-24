@@ -1,7 +1,7 @@
 # @package _global_
 
 defaults:
-  - /monty: evidencegraph_exp1000_e3_t3
+  - /monty: evidencegraph
   - /monty/motor_system_config: distant_5
   - /monty/learning_module: evidence_3lm_heterarchy
   - /monty/sensor_module: 3sm_2d3d_dist_slic # TODO
@@ -11,11 +11,11 @@ defaults:
   - /env_interface: train_cows_small_predefined
   - /env_interface/positioning_procedures_train: getgoodview_viewfinder_patch0
   - /env_interface/transform: gaussianblur_missing_depthto3d_sensor4_256
-  # Episode limits and the AnyLMsMatch(count=3) match criterion live here now.
-  # ObjectRecognition keeps matching (so child LMs send their outputs up) until
-  # Monty switches to exploring itself or 250 matching steps pass. 1250 total is
-  # what the old code used: it bumped 500 up to num_exploratory_steps + 250.
-  - /termination: any3_objectrecognition_t250_e500_tot1250
+  # Episode limits and the AnyLMsMatch(count=3) match criterion live here.
+  # Matching continues (so child LMs send their outputs up) until the mfgm
+  # strategy switches Monty to exploring or 250 matching steps pass. 1250 total
+  # is what the old code used: it bumped 500 up to num_exploratory_steps + 250.
+  - /termination: any3_any_mfgm_t3e3exp1000_t250e500tot1250
   - /logging: silent_info_train
 
 experiment:
@@ -59,26 +59,16 @@ experiment:
         # - 027_mug_numenta_vert
     monty_config:
       monty_args:
+        # LM2 must pair LM1's output with the location it was computed at; with
+        # the default one-step lag it gets the previous point's tangent frame.
         same_step_lm_outputs: true
-      motor_system_config:
-        telemetry:
-          _target_: tbp.monty.frameworks.models.motor_system_telemetry.NoopMotorSystemTelemetry
       learning_modules:
         learning_module_0:
-          region_proposers:
-            - _target_: tbp.monty.frameworks.models.evidence_matching.region_proposal.excite_goal_locations.ExciteGoalLocations
-          telemetry:
-            _target_: tbp.monty.frameworks.models.evidence_matching.telemetry.NoopEvidenceGraphLMTelemetry
           gsg:
             min_post_goal_success_steps: 100
         learning_module_1:
           gsg: null
-          output_min_evidence: 20.0
         learning_module_2:
-          region_proposers:
-            - _target_: tbp.monty.frameworks.models.evidence_matching.region_proposal.excite_goal_locations.ExciteGoalLocations
-          telemetry:
-            _target_: tbp.monty.frameworks.models.evidence_matching.telemetry.NoopEvidenceGraphLMTelemetry
           gsg: null
       sensor_modules:
         sensor_module_3:

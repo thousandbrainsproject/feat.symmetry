@@ -8,7 +8,7 @@
 # per-step sensor displacement between the LMs (_combine_votes), or set a
 # breakpoint in EvidenceGraphLM._update_evidence_with_vote.
 defaults:
-  - /monty: evidencegraph_exp1000_e3_t3
+  - /monty: evidencegraph
   - /monty/motor_system_config: naive_scan_1
   - /monty/learning_module: evidence_2lm_2d
   - /monty/sensor_module: 2sm_2d_dist
@@ -17,7 +17,7 @@ defaults:
   - /env_interface: eval_cows_small_2d_vote_predefined
   - /env_interface/positioning_procedures_eval: getgoodview_viewfinder_patch0
   - /env_interface/transform: gaussianblur_missing_depthto3d_2d_sensor3_256
-  - /termination: any2_objectrecognition_t1000_e500_tot6000
+  - /termination: any2_any_mfgm_t3e3exp1000_t1000e500tot6000
   - /logging: detailed_info_evidence_eval_runs
 
 experiment:

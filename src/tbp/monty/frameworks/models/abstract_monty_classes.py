@@ -31,7 +31,7 @@ from tbp.monty.frameworks.models.motor_system_state import (
     ProprioceptiveState,
 )
 from tbp.monty.frameworks.sensors import SensorID
-from tbp.monty.geometry import Rotation
+from tbp.monty.geometry import OrientationMatrix, Rotation, SurfacePoseVectors
 from tbp.monty.memento import Memento, Snapshotable
 from tbp.monty.observations import SensorObservation
 
@@ -149,7 +149,6 @@ class Monty(ExperimentMonty, RuntimeMonty, Snapshotable, metaclass=abc.ABCMeta):
         self._vote()
         self._pass_goals()
         self._step_motor_system(ctx, observations, proprioceptive_state)
-        self._set_step_type_and_check_if_done()
 
     def _exploratory_step(
         self,
@@ -170,7 +169,6 @@ class Monty(ExperimentMonty, RuntimeMonty, Snapshotable, metaclass=abc.ABCMeta):
         self._step_learning_modules(ctx)
         self._pass_goals()
         self._step_motor_system(ctx, observations, proprioceptive_state)
-        self._set_step_type_and_check_if_done()
 
     @abc.abstractmethod
     def step(
@@ -236,14 +234,6 @@ class Monty(ExperimentMonty, RuntimeMonty, Snapshotable, metaclass=abc.ABCMeta):
             ctx: The runtime context.
             observations: The observations from the environment.
             proprioceptive_state: The proprioceptive state from the environment.
-        """
-        pass
-
-    @abc.abstractmethod
-    def _set_step_type_and_check_if_done(self):
-        """Check terminal conditions and decide if to change the step type.
-
-        Update what self.is_done returns to the experiment.
         """
         pass
 
@@ -351,20 +341,6 @@ class RuntimeLearningModule(Protocol):
         """Return the attention region to attend to."""
         ...
 
-    def receive_goal_attempt(self, goal: Goal) -> None:
-        """Receive an efferent copy of a goal of this LM the motor system attempted.
-
-        Called when the motor system began executing a goal-driven movement
-        (e.g. a hypothesis-testing jump) toward a goal proposed by this LM's
-        GSG. The signal carries no information about the movement's outcome;
-        the LM can combine it with its subsequent sensory input to judge
-        whether the attempt succeeded.
-
-        Args:
-            goal: The goal the motor system attempted.
-        """
-        ...
-
     def get_output(self) -> Message | None:
         """Return learning module output (same format as input)."""
         ...
@@ -431,19 +407,6 @@ class LearningModule(
     def propose_goals(self) -> list[Goal]:
         pass
 
-    def receive_goal_attempt(self, goal: Goal) -> None:
-        """Receive an efferent copy of a goal of this LM the motor system attempted.
-
-        By default this signal is ignored. LMs that use goal-driven movements
-        (e.g. hypothesis-testing jumps) can override this to combine the
-        efferent copy with subsequent sensory input, e.g. to detect failed
-        jumps and accumulate negative evidence for the hypothesis that
-        proposed the goal.
-
-        Args:
-            goal: The goal the motor system attempted.
-        """
-
     @abc.abstractmethod
     def propose_region(self) -> AttentionRegion:
         pass
@@ -472,9 +435,6 @@ class LearningModule(
 class LMMemory(Snapshotable, metaclass=abc.ABCMeta):
     """Like a long-term memory storing all the knowledge an LM has."""
 
-    ###
-    # Methods that define the algorithm
-    ###
     @abc.abstractmethod
     def update_memory(
         self,
@@ -484,6 +444,7 @@ class LMMemory(Snapshotable, metaclass=abc.ABCMeta):
         object_location_rel_body: npt.NDArray[np.float64],
         location_rel_model: npt.NDArray[np.float64],
         object_rotation: Rotation | None,
+        pose_vector_types: dict[str, type[SurfacePoseVectors | OrientationMatrix]],
     ) -> None:
         """Update models stored in memory given an episode's observations.
 
@@ -497,6 +458,7 @@ class LMMemory(Snapshotable, metaclass=abc.ABCMeta):
             location_rel_model: Location of the last observation relative to the
                 object model.
             object_rotation: Rotation of the object relative to the world.
+            pose_vector_types: Map from input channel name to pose vector type.
         """
         pass
 
