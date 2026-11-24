@@ -53,6 +53,7 @@ class MontyBase(Monty):
         lm_to_lm_matrix,
         lm_to_lm_vote_matrix,
         attention_system: AttentionSystem | None = None,
+        same_step_lm_outputs: bool = False,
     ) -> None:
         """Initialize the base class.
 
@@ -80,6 +81,11 @@ class MontyBase(Monty):
                 `None` is passed.
             attention_system: The attention system to be used.
                 If `None`, a NoopAttentionSystem will be used.
+            same_step_lm_outputs: If True, refresh each LM's output right after it
+                steps, so a parent LM later in `learning_modules` receives what its
+                children inferred from the current step's sensation. If False (the
+                default), parents receive their children's outputs from the
+                previous step.
 
         Raises:
             ValueError: If `sm_to_lm_matrix` is not defined
@@ -87,6 +93,8 @@ class MontyBase(Monty):
                 do not match
             ValueError: If the keys of `sm_to_agent_dict` do not match the
                 `sensor_module_id`s of `sensor_modules`
+            ValueError: If `same_step_lm_outputs` is True and some LM receives
+                input from an LM that is not indexed before it
         """
         # Basic instance attributes
         self.sensor_modules = sensor_modules
@@ -127,6 +135,18 @@ class MontyBase(Monty):
                 "sm_to_agent_dict must contain exactly one key for each "
                 "sensor_module id; no more, no less!"
             )
+
+        # Same-step outputs only reach a parent stepped after its children;
+        # any other pair would silently stay one step behind.
+        if same_step_lm_outputs and self.lm_to_lm_matrix is not None:
+            for parent, children in enumerate(self.lm_to_lm_matrix):
+                if any(child >= parent for child in children):
+                    raise ValueError(
+                        "same_step_lm_outputs needs every child LM indexed before "
+                        f"its parent, but learning_modules[{parent}] receives "
+                        f"input from {list(children)}."
+                    )
+        self.same_step_lm_outputs = same_step_lm_outputs
 
         self._is_done = False
         self._actions: list[Action] = []
@@ -227,6 +247,8 @@ class MontyBase(Monty):
         for i in range(len(self.learning_modules)):
             sensory_inputs = self._collect_inputs_to_lm(i)
             getattr(self.learning_modules[i], self.step_type)(ctx, sensory_inputs)
+            if self.same_step_lm_outputs:
+                self.learning_module_outputs[i] = self.learning_modules[i].get_output()
 
     def _collect_inputs_to_lm(self, lm_id: int) -> list[Message]:
         """Use sm_to_lm_matrix and lm_to_lm_matrix to collect inputs to LM i.

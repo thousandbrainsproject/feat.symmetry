@@ -58,6 +58,10 @@ experiment:
         # - 025_mug_tbp_vert
         # - 027_mug_numenta_vert
     monty_config:
+      monty_args:
+        # LM2 must pair LM1's output with the location it was computed at; with
+        # the default one-step lag it gets the previous point's tangent frame.
+        same_step_lm_outputs: true
       learning_modules:
         learning_module_0:
           gsg:
